@@ -3,7 +3,26 @@ import random
 import math
 
 from tensor_utils import cutout_circle, cutout_rectangle
-from wave_kernel import make_wave_kernel
+from wave_kernel import make_wave_kernel, pad_field
+
+def make_obstacle_map(obstacles, height, width):
+    m = torch.ones(
+        (height, width),
+        requires_grad=False,
+        dtype=torch.float32
+    )
+
+    for o in obstacles:
+        t = o[0]
+        args = o[1:]
+        n_args = len(args)
+        if (t == CIRCLE):
+            assert(n_args == 3)
+            cutout_circle(m, args[0], args[1], args[2])
+        elif (t == RECTANGLE):
+            assert(n_args == 4)
+            cutout_rectangle(m, args[0], args[1], args[2], args[3])
+    return m
 
 def overlapping(obstacle1, obstacle2):
     t1 = obstacle1[0]
@@ -35,7 +54,18 @@ class Field():
         self._width = width
         self._obstacles = []
         self._dirty_barrier = True
-        self._wave_kernel = make_wave_kernel()
+        self._wave_kernel = make_wave_kernel(
+            propagation_speed=1.0,
+            time_step=0.1,
+            velocity_damping=0.999,
+            velocity_dispersion=0.05
+        )
+        self._padding_parameters = torch.Tensor([
+            0.2731468678,  0.3291435242, -0.5704568028, -0.1916972548, -0.0072381911, -0.0069156736, -0.0045501599,  0.0087358886,
+            -0.0653517470,  0.1985650659, -0.3193856180,  0.1051328108, -0.0030024105, -0.0037237250, -0.0020352036,  0.0133369453,
+            0.2357937992,  0.2602138519, -0.5818488598, -0.2399103791, -0.0069989869, -0.0064358339, -0.0043960437,  0.0090550631,
+            -0.1118448377,  0.1101172492, -0.3644709289,  0.0389745384, -0.0027823041, -0.0032603526, -0.0019526740,  0.0135646062
+        ]).cuda()
         self._field = torch.zeros(
             (1, 2, height, width),
             requires_grad=False,
@@ -78,24 +108,8 @@ class Field():
         if not self._dirty_barrier:
             return
 
-        self._barrier = torch.ones(
-            (1, 2, self._height, self._width),
-            requires_grad=False,
-            dtype=torch.float32
-        ).cuda()
-
-        for o in self._obstacles:
-            t = o[0]
-            args = o[1:]
-            n_args = len(args)
-            if (t == CIRCLE):
-                assert(n_args == 3)
-                cutout_circle(self._barrier, args[0], args[1], args[2])
-            elif (t == RECTANGLE):
-                assert(n_args == 4)
-                cutout_rectangle(self._barrier, args[0], args[1], args[2], args[3])
-
-        # TODO: border fringe?
+        self._barrier = make_obstacle_map(self._obstacles, self._height, self._width)
+        self._barrier = self._barrier.unsqueeze(0).unsqueeze(0).cuda()
 
         self._dirty_barrier = False
 
@@ -110,15 +124,20 @@ class Field():
 
     def step(self):
         self._update_barrier()
-        self._field[...] = self._wave_kernel(self._field) * self._barrier
+
+        self._field = self._wave_kernel(pad_field(self._field, self._padding_parameters))
+
+        self._field *= self._barrier
+
+        assert(self._field.shape == (1, 2, self._height, self._width))
 
 def make_random_field(height, width, max_num_obstacles=10):
     f = Field(height, width)
     n = random.randint(1, max_num_obstacles)
 
     def collision(shape):
-        if overlapping(shape, (RECTANGLE, 0.5, 0.5, 0.2, 0.2)):
-            return True
+        #if overlapping(shape, (RECTANGLE, 0.9, 0.5, 0.2, 1.0)):
+        #    return True
         for s in f.get_obstacles():
             if (overlapping(s, shape)):
                 return True
@@ -126,8 +145,8 @@ def make_random_field(height, width, max_num_obstacles=10):
 
     for _ in range(n):
         for _ in range(100):
-            # y = random.uniform(0, 0.75)
-            y = random.uniform(0, 1)
+            y = random.uniform(0, 0.75)
+            # y = random.uniform(0, 1)
             x = random.uniform(0, 1)
             if random.random() < 0.5:
                 # rectangle

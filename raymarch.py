@@ -3,7 +3,10 @@ import torch
 
 from field import Field
 
-def raymarch(field, x, y, dirx, diry, fov=60, res=128, step_size=1):
+# TODO: this is unnecessary and inefficient.
+# Simple line-rectangle and line-circle intersection tests should suffice, similar to how SDF is computed
+
+def raymarch(field, y, x, diry, dirx, fov=60, res=128, step_size=1):
     barrier = field.get_barrier()#.cpu()
     assert(len(barrier.shape) == 4)
     b, c, h, w = barrier.shape

@@ -1,5 +1,6 @@
 __pycache__/
 dataset/
+logs/
 *.mp4
 *.wav
 *.dat

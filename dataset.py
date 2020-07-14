@@ -2,40 +2,60 @@ import pickle
 import torch
 import glob
 
-from featurize import make_obstacle_heatmap
+from featurize import make_obstacle_heatmap, permute_example, shortest_distance_to_obstacles
 from device_dict import DeviceDict
-from featurize import sclog
+from featurize import sclog #, center_and_undelay_signal, add_signal_heatmap
+from field import make_obstacle_map, CIRCLE, RECTANGLE
+
+
 
 class WaveSimDataset(torch.utils.data.Dataset):
-    def __init__(self, data_folder):
+    def __init__(self, data_folder, permute=True, samples_per_example=1024):
         super(WaveSimDataset).__init__()
-        self.data = []
+        self._permute = permute
+        self._spe = samples_per_example
+        self._data = []
         print("Loading data into memory...")
-        for path in glob.glob("{}/example *.pkl".format(data_folder)):
+        for path in sorted(glob.glob("{}/example *.pkl".format(data_folder))):
             with open(path, "rb") as file:
-                example = pickle.load(file)
-            self.data.append(example)
+                # obs, depthmap, echo = pickle.load(file)
+                obs, echo = pickle.load(file)
+                echo = torch.tensor(echo).permute(1, 0).float().detach()
+            self._data.append((obs, echo))
         print("Done.")
-            
+    
     def __len__(self):
-        return len(self.data)
+        return len(self._data) * (8 if self._permute else 1) * self._spe
     
     def __getitem__(self, idx):
-        obs, depthmap, echo = self.data[idx]
-        echo = torch.tensor(echo).permute(1, 0).float().detach()
+        idx = idx // self._spe
+        if (self._permute):
+            permutation = idx % 8
+            idx = idx // 8
+        obs, echo = self._data[idx]
+
+        if (self._permute):
+            obs, echo = permute_example(obs, echo, permutation)
+        
+        sdf_yx = torch.rand(2)
+
+        sdf_value = torch.tensor([
+            shortest_distance_to_obstacles(obs, sdf_yx[0], sdf_yx[1])
+        ])
+
         echo_raw = echo
         echo_waveshaped = sclog(torch.tensor(echo))
-        depthmap = torch.tensor(depthmap).float().detach()
-        assert(echo.shape == (4, 8192))
-        assert(depthmap.shape == (128,))
-        # mindist = torch.min(depthmap).float().detach()
-        # heatmap_first_only = make_first_echo_bump(mindist, 8192).float().detach()
-        heatmap = make_obstacle_heatmap(obs, 512, 8192)
+        obstacles_map = make_obstacle_map(obs, 32, 32)
+        # assert(echo.shape == (4, 4096))
+        # assert(echo.shape == (64, 8192))
+        echo_len = echo.shape[1]
+        heatmap = make_obstacle_heatmap(obs, 512, echo_len)
         return DeviceDict({
-            'obstacles': obs,
+            'obstacles_list': obs,
+            'obstacles': obstacles_map,
             'echo_raw': echo_raw,
-            'echo_waveshaped': echo_waveshaped,
-            'depthmap': depthmap,
-        #   'mindist': mindist,
+            'echo_waveshaped': echo_waveshaped, # add_signal_heatmap(echo_waveshaped, sdf_yx[0], sdf_yx[1]),
             'heatmap': heatmap,
+            'sdf_location': sdf_yx,
+            'sdf_value': sdf_value
         })
