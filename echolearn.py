@@ -13,13 +13,11 @@ import PIL.Image
 from device_dict import DeviceDict
 from dataset import WaveSimDataset
 from progress_bar import progress_bar
-from featurize import shortest_distance_to_obstacles, make_sdf_image_gt, make_sdf_image_pred
+from featurize import make_sdf_image_gt, make_sdf_image_pred, make_receiver_indices, make_heatmap_image_gt, make_heatmap_image_pred, make_depthmap_gt, make_depthmap_pred
 from custom_collate_fn import custom_collate
 
-# from unet_cnn import UNetCNN
-# from DepthMapNet import DepthMapNet
-# from ObstacleMapNet import ObstacleMapNet
-from ObstacleSDFNet import ObstacleSDFNet
+from EchoLearnNN import EchoLearnNN
+from SimpleNN import SimpleNN
 
 to_tensor = torchvision.transforms.ToTensor()
 
@@ -36,19 +34,64 @@ def plt_screenshot():
 def main():
     parser = ArgumentParser()
     parser.add_argument("--experiment", type=str, dest="experiment", required=True)
-    parser.add_argument("--showloss", type=bool, dest="showloss", required=True)
     parser.add_argument("--dataset", type=str, dest="dataset", required=True)
+    parser.add_argument("--numexamples", type=int, dest="numexamples", default=None)
+    parser.add_argument("--batchsize", type=int, dest="batchsize", default=64)
+    parser.add_argument("--receivers", type=int, choices=[1, 2, 4, 8, 16, 32, 64], dest="receivers", required=True)
+    parser.add_argument("--arrangement", type=str, choices=["flat", "grid"], dest="arrangement", required=True)
+    parser.add_argument("--maxobstacles", type=int, dest="maxobstacles", default=None)
+    parser.add_argument("--circlesonly", dest="circlesonly", default=False, action="store_true")
+    parser.add_argument("--nosave", dest="nosave", default=False, action="store_true")
+    parser.add_argument("--iterations", type=int, dest="iterations", default=None)
+    parser.add_argument("--implicitfunction", dest="implicitfunction", default=False, action="store_true")
+    parser.add_argument("--gradientregularizer", dest="gradientregularizer", type=float, required=False)
+    parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram"], required=True)
+    parser.add_argument("--nnoutput", type=str, dest="nnoutput", choices=["sdf", "heatmap", "depthmap"], required=True)
+    parser.add_argument("--simplenn", dest="simplenn", default=False, action="store_true")
+    parser.add_argument("--plotinterval", type=int, dest="plotinterval", default=32)
+    parser.add_argument("--validationinterval", type=int, dest="validationinterval", default=256)
+
     args = parser.parse_args()
+
+    receiver_indices = make_receiver_indices(args.receivers, args.arrangement)
+
+    if args.nninput == "audioraw":
+        input_format = "1D"
+    elif args.nninput == "audiowaveshaped":
+        input_format = "1D"
+    elif args.nninput == "spectrogram":
+        input_format = "2D"
+
+    if args.nnoutput == "sdf":
+        implicit_params = 2
+        output_format = "2D"
+    elif args.nnoutput == "depthmap":
+        implicit_params = 1
+        output_format = "1D"
+    elif args.nnoutput == "heatmap":
+        implicit_params = 2
+        output_format = "2D"
+
+    if args.implicitfunction:
+        output_format = "scalar"
+    else:
+        implicit_params = 0
+
+    output_resolution = 32 # TODO: allow this to be customized? This has some implications for the internal bandwidth of the network
 
     ecds = WaveSimDataset(
         data_folder="dataset/{}".format(args.dataset),
-        permute=False,
-        samples_per_example=1
+        samples_per_example=128,
+        num_examples=args.numexamples,
+        max_obstacles=args.maxobstacles,
+        receiver_indices=receiver_indices,
+        circles_only=args.circlesonly,
+        input_representation=args.nninput,
+        output_representation=args.nnoutput,
+        implicit_function=args.implicitfunction
     )
 
-    batch_size = 64
-
-    val_ratio = 0.1
+    val_ratio = 1 / 8
     val_size = int(len(ecds)*val_ratio)
     indices_val = list(range(0, val_size))
     indices_train = list(range(val_size, len(ecds)))
@@ -61,7 +104,7 @@ def main():
 
     train_loader = torch.utils.data.DataLoader(
         train_set,
-        batch_size=batch_size,
+        batch_size=args.batchsize,
         num_workers=0,
         pin_memory=False, # Note, setting pin_memory=False to avoid the pin_memory call
         shuffle=True,
@@ -70,7 +113,7 @@ def main():
     )
     val_loader = torch.utils.data.DataLoader(
         val_set,
-        batch_size=batch_size,
+        batch_size=args.batchsize,
         num_workers=0,
         pin_memory=False,
         shuffle=True,
@@ -78,33 +121,89 @@ def main():
         collate_fn=collate_fn_device
     )
 
-    loss_function = torch.nn.functional.mse_loss
+    # Encourages one of two things:
+    # - Either the value is zero and the gradient is zero, or
+    # - the value is nonzero and the gradient's magnitude is 1
+    # Parameters:
+    # - value: value of the function
+    # - gradient: magnitude of the derivative of the value w.r.t. its spatial coordinates
+    # - kZeroTolerance: varies the radius of the region around zero that is considered to be zero
+    def zeroZeroXOneLoss(value, gradientMag):
+        return torch.mean(torch.sqrt((value**2 + gradientMag**2) * (gradientMag - 1.0)**2))
+    
+    if (args.gradientregularizer is not None):
+        assert(args.nnoutput == "sdf")
+        if (args.implicitfunction):
+            def gradientRegularizedLoss(batch_input, batch_output):
+                x1 = batch_input["output"]
+                x2 = batch_output["output"]
+                params = batch_gpu["params"]
+                mse = torch.nn.functional.mse_loss(x1, x2)
+                grad, = torch.autograd.grad(mse, params, retain_graph=True)
+                grad_mag = torch.sqrt(torch.sum(grad**2, dim=2))
+                grad_penality = zeroZeroXOneLoss(x2, grad_mag)
+                return mse + grad_penality * args.gradientregularizer
+            loss_function = gradientRegularizedLoss
+        else:
+            def gradientRegularizedLoss(batch_input, batch_output):
+                x1 = batch_input["output"]
+                x2 = batch_output["output"]
+                mse = torch.nn.functional.mse_loss(x1, x2)
+                # NOTE: assuming the square output region has unit size, each
+                # pixel has size (1.0 / output_resolution). The following two
+                # lines are a finite-differences estimate of the image gradient,
+                # with sampling points chosen at a distance of two pixels apart
+                # (for symmetry), or (2.0 / output_resolution). The difference
+                # needs to be divided by the distance, which is equivalent
+                # to multiplying by (output_resolution / 2.0)
+                dy = (x2[:, 2:, 1:-1] - x2[:, :-2, 1:-1]) * (output_resolution / 2.0)
+                dx = (x2[:, 1:-1, 2:] - x2[:, 1:-1, :-2]) * (output_resolution / 2.0)
+                grad_mag = torch.sqrt(dy**2 + dx**2)
+                value = x2[:, 1:-1, 1:-1]
+                grad_penality = zeroZeroXOneLoss(value, grad_mag)
+                return mse + grad_penality * args.gradientregularizer
+            loss_function = gradientRegularizedLoss
+    else:
+        def bogStandardLoss(batch_input, batch_output):
+            x1 = batch_input["output"]
+            x2 = batch_output["output"]
+            return torch.nn.functional.mse_loss(x1, x2)
+        loss_function = bogStandardLoss
+        
 
     ##############################################
     # Helper function to compute validation loss #
     ##############################################
-    def compute_averaged_loss(model, loader, key):
+    def compute_averaged_loss(model, loader):
+        print("Computing validation loss (MSE)...")
         it = iter(loader)
         losses = []
-        for i in range(min(len(loader), 100)): # range(len(val_iter)):
+        for i in range(len(loader)):
             batch = next(it).to('cuda')
             pred = model(batch)
-            depthmap_pred = pred[key]
-            depthmap_gt = batch[key]
-            loss = loss_function(depthmap_pred, depthmap_gt)
+            depthmap_pred = pred["output"]
+            depthmap_gt = batch["output"]
+            loss = torch.nn.functional.mse_loss(depthmap_pred, depthmap_gt)
             losses.append(loss.item())
+        print("Computing validation loss (MSE)... Done.")
         return np.mean(np.asarray(losses))
         
-    def training_loss(model, key):
-        return compute_averaged_loss(model, train_loader, key)
+    def training_loss(model):
+        return compute_averaged_loss(model, train_loader)
         
-    def validation_loss(model, key):
-        return compute_averaged_loss(model, val_loader, key)
+    def validation_loss(model):
+        x = compute_averaged_loss(model, val_loader)
+        return x
 
-    # network = UNetCNN().cuda()
-    # network = DepthMapNet().cuda()
-    # network = ObstacleMapNet().cuda()
-    network = ObstacleSDFNet().cuda()
+    NetworkType = SimpleNN if args.simplenn else EchoLearnNN
+
+    network = NetworkType(
+        num_input_channels=args.receivers,
+        num_implicit_params=implicit_params,
+        input_format=input_format,
+        output_format=output_format,
+        output_resolution=(None if args.implicitfunction else output_resolution)
+    ).cuda()
 
     def save_network(filename):
         filename = "models/" + filename
@@ -117,50 +216,66 @@ def main():
         network.load_state_dict(torch.load(filename))
         network.eval()
 
-    # restore_network("time_representation_test_even_less_convs_16_permuted_examples_02-07-2020_09-02-04_model_best.dat")
+    def plot_inputs(pltx_axis, batch):
+        the_input = batch['input'][0].detach()
+        if (len(the_input.shape) == 2):
+            for j in range(args.receivers):
+                pltx_axis.plot(the_input[j].detach())
+            pltx_axis.set_ylim(-1, 1)
+        else:
+            the_input_min = torch.min(the_input)
+            the_input_max = torch.max(the_input)
+            the_input = (the_input - the_input_min) / (the_input_max - the_input_min)
+            spectrogram_img_grid = torchvision.utils.make_grid(
+                the_input.unsqueeze(1).repeat(1, 3, 1, 1),
+                nrow=1
+            )
+            pltx_axis.imshow(spectrogram_img_grid.permute(1, 2, 0))
 
-    # def render_test_animation():
-    #     ds = WaveSimDataset(data_folder="dataset/v7_test", permute=False, samples_per_example=1)
-    #     ld = torch.utils.data.DataLoader(
-    #         ds,
-    #         batch_size=1,
-    #         num_workers=0,
-    #         pin_memory=False, # Note, setting pin_memory=False to avoid the pin_memory call
-    #         shuffle=False,
-    #         drop_last=True,
-    #         collate_fn=collate_fn_device
-    #     )
-    #     plt.axis('off')
-    #     # fig = plt.figure(
-    #     #     figsize=(8,8),
-    #     #     dpi=64
-    #     # )
-    #     it = iter(ld)
-    #     def next_data():
-    #         batch = next(it).to('cuda')
-    #         return make_sdf_image_pred(batch, 32, network)
-    #         # return make_sdf_image_gt(batch, 32)
-        
-    #     num_frames = len(ld)
-    #     def animate(i):
-    #         plt.clf()
-    #         plt.imshow(next_data(), vmin=0.0, vmax=0.5, cmap='hsv')
-    #         progress_bar(i, num_frames)
-    #     output_path = "test set sdf prediction.mp4"
-    #     fps = 30
-    #     ani = matplotlib.animation.FuncAnimation(
-    #         plt.gcf(),
-    #         animate,
-    #         frames=num_frames,
-    #         interval = 1000/fps
-    #     )
+    def plot_ground_truth(plt_axis, batch):
+        if args.nnoutput == "sdf":
+            img = make_sdf_image_gt(batch, output_resolution)
+            plt_axis.imshow(img, vmin=0, vmax=0.5, cmap='hsv')
+        elif args.nnoutput == "heatmap":
+            img = make_heatmap_image_gt(batch, output_resolution)
+            plt_axis.imshow(img, vmin=0, vmax=1.0)
+        elif args.nnoutput == "depthmap":
+            arr = make_depthmap_gt(batch, output_resolution)
+            plt_axis.plot(arr)
+            plt_axis.set_ylim(0.0, 1.0)
+        else:
+            raise Exception("Unrecognized output representation")
 
-    #     ani.save(output_path)
-
-    #     sys.stdout.write("\nSaved animation to {}".format(output_path))
-
-    # render_test_animation()
-    # return
+    def plot_prediction(plt_axis, batch, network):
+        if args.implicitfunction:
+            if args.nnoutput == "sdf":
+                img = make_sdf_image_pred(batch, output_resolution, network)
+                plt_axis.imshow(img, vmin=0, vmax=0.5, cmap='hsv')
+            elif args.nnoutput == "heatmap":
+                img = make_heatmap_image_pred(batch, output_resolution, network)
+                plt_axis.imshow(img, vmin=0, vmax=1.0)
+            elif args.nnoutput == "depthmap":
+                arr = make_depthmap_pred(batch, output_resolution, network)
+                plt_axis.plot(arr)
+                plt_axis.set_ylim(-0.1, 1.1)
+            else:
+                raise Exception("Unrecognized output representation")
+        else:
+            # non-implicit function
+            output = network(batch)['output'][0].detach().cpu().numpy()
+            if args.nnoutput == "sdf":
+                assert(output.shape == (output_resolution, output_resolution))
+                plt_axis.imshow(output, vmin=0, vmax=0.5, cmap='hsv')
+            elif args.nnoutput == "heatmap":
+                assert(output.shape == (output_resolution, output_resolution))
+                plt_axis.imshow(output, vmin=0, vmax=1.0)
+            elif args.nnoutput == "depthmap":
+                assert(len(output.shape) == 1)
+                assert(output.shape[0] == output_resolution)
+                plt_axis.plot(output)
+                plt_axis.set_ylim(-0.1, 1.1)
+            else:
+                raise Exception("Unrecognized output representation")
 
     optimizer = torch.optim.Adam(network.parameters(), lr=0.001)
 
@@ -171,20 +286,7 @@ def main():
     with SummaryWriter(log_path) as writer:
 
         plt.ion()
-        # fig = plt.figure(figsize=(20, 10), dpi= 80, facecolor='w', edgecolor='k')
-        # axes=fig.subplots(2,3)
 
-        # Oh boy do I hate this interface
-        # ax_t1 = plt.subplot(241)
-        # ax_t2 = plt.subplot(242)
-        # ax_t3 = plt.subplot(243)
-        # ax_t4 = plt.subplot(244)#, projection="polar")
-        # ax_b1 = plt.subplot(245)
-        # ax_b2 = plt.subplot(246)
-        # ax_b3 = plt.subplot(247)
-        # ax_b4 = plt.subplot(248)
-
-        numcols = 4 if args.showloss else 3
         fig, axes = plt.subplots(2, 4, figsize=(16, 6), dpi=100)
 
         ax_t1 = axes[0,0]
@@ -193,34 +295,28 @@ def main():
         ax_b1 = axes[1,0]
         ax_b2 = axes[1,1]
         ax_b3 = axes[1,2]
+        ax_t4 = axes[0,3]
+        ax_b4 = axes[1,3]
 
-        if args.showloss:
-            ax_t4 = axes[0,3]
-            ax_b4 = axes[1,3]
-
-        # angles = np.linspace(0.0, math.pi * 2.0, 128)
-        
-        sdf_img_size = 32
-
-        visualization_interval = len(train_loader) * 4
+        if (args.nosave):
+            print("NOTE: networks are not being saved")
 
         num_epochs = 1000000
         losses = []
         val_loss_y = []
         val_loss_x = []
         best_val_loss = np.inf
-        key = 'sdf_value'
         global_iteration = 0
         for e in range(num_epochs):
             train_iter = iter(train_loader)
             for i in range(len(train_loader)):
                 batch_cpu = next(train_iter)
                 batch_gpu = batch_cpu.to('cuda')
-                
+
                 pred_gpu = network(batch_gpu)
                 pred_cpu = pred_gpu.to('cpu')
                 
-                loss = loss_function(pred_gpu[key], batch_gpu[key])
+                loss = loss_function(pred_gpu, batch_gpu)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -228,23 +324,25 @@ def main():
 
                 writer.add_scalar("training loss", loss.item(), global_iteration)
                 
-                progress_bar((global_iteration) % visualization_interval, visualization_interval)
+                progress_bar((global_iteration) % args.plotinterval, args.plotinterval)
 
-                if ((global_iteration + 1) % visualization_interval) == 0:
-                    print("")
-                    val_batch_cpu = next(iter(val_loader))
-                    val_batch_gpu = val_batch_cpu.to('cuda')
-
-                    curr_val_loss = validation_loss(network, key)
+                if ((global_iteration + 1) % args.validationinterval) == 0:
+                    curr_val_loss = validation_loss(network)
                     if curr_val_loss < best_val_loss:
                         best_val_loss = curr_val_loss
-                        save_network("{}_{}_model_best.dat".format(args.experiment, timestamp))
+                        if not args.nosave:
+                            save_network("{}_{}_model_best.dat".format(args.experiment, timestamp))
 
 
                     val_loss_x.append(len(losses))
                     val_loss_y.append(curr_val_loss)
                     
                     writer.add_scalar("validation loss", curr_val_loss, global_iteration)
+
+                if ((global_iteration + 1) % args.plotinterval) == 0:
+                    print("")
+                    val_batch_cpu = next(iter(val_loader))
+                    val_batch_gpu = val_batch_cpu.to('cuda')
 
                     # clear figures for a new update
                     ax_t1.cla()
@@ -253,46 +351,38 @@ def main():
                     ax_b2.cla()
                     ax_t3.cla()
                     ax_b3.cla()
-                    if args.showloss:
-                        ax_t4.cla()
-                        ax_b4.cla()
+                    ax_t4.cla()
+                    ax_b4.cla()
+
+                    plt.gcf().suptitle(args.experiment)
                         
                     # plot the input waveforms
-                    ax_t1.title.set_text("Waveform (raw)")
-                    echo_raw = batch_cpu['echo_raw'][0].detach()
-                    for j in range(echo_raw.shape[0]):
-                        ax_t1.plot(echo_raw[j].detach())
-                    ax_t1.set_ylim(-1, 1)
+                    ax_t1.title.set_text("Input (train)")
+                    plot_inputs(ax_t1, batch_cpu)
+                    ax_b1.title.set_text("Input (val.)")
+                    plot_inputs(ax_b1, val_batch_cpu)
                     
-                    ax_b1.title.set_text("Waveform (waveshaped)")
-                    echo_waveshaped = batch_cpu['echo_waveshaped'][0].detach()
-                    for j in range(echo_waveshaped.shape[0]):
-                        ax_b1.plot(echo_waveshaped[j].detach())
-                    ax_b1.set_ylim(-1, 1)
+                    # plot the ground truth obstacles
+                    ax_t2.title.set_text("Ground Truth (train)")
+                    plot_ground_truth(ax_t2, batch_cpu)
+                    ax_b2.title.set_text("Ground Truth (val.)")
+                    plot_ground_truth(ax_b2, val_batch_cpu)
                     
+                    # plot the predicted sdf
+                    ax_t3.title.set_text("Prediction (train)")
+                    plot_prediction(ax_t3, batch_gpu, network)
+                    ax_b3.title.set_text("Prediction (val.)")
+                    plot_prediction(ax_b3, val_batch_gpu, network)
                     
-                    # plot the ground truth obstacles (training set)
-                    ax_t2.title.set_text("Ground Truth SDF (train)")
-                    ax_t2.imshow(make_sdf_image_gt(batch_cpu, sdf_img_size), vmin=0, vmax=0.5, cmap='hsv')
-                    
-                    # plot the predicted sdf (training set)
-                    ax_b2.title.set_text("Predicted SDF (train)")
-                    ax_b2.imshow(make_sdf_image_pred(batch_gpu, sdf_img_size, network), vmin=0, vmax=0.5, cmap='hsv')
-                    
-                    # plot the ground truth obstacles (validation set)
-                    ax_t3.title.set_text("Ground Truth SDF (validation)")
-                    ax_t3.imshow(make_sdf_image_gt(val_batch_cpu, sdf_img_size), vmin=0, vmax=0.5, cmap='hsv')
-                    
-                    # plot the predicted obstacles (validation set)
-                    ax_b3.title.set_text("Predicted SDF (validation)")
-                    ax_b3.imshow(make_sdf_image_pred(val_batch_gpu, sdf_img_size, network), vmin=0, vmax=0.5, cmap='hsv')
-                    
-                    if args.showloss:
-                        # plot the training and validation errors on a log plot
-                        ax_t4.title.set_text("Loss")
-                        ax_t4.scatter(range(len(losses)), losses, s=1.0)
-                        ax_t4.set_yscale('log')
-                        ax_t4.plot(val_loss_x, val_loss_y, c="Red")
+                    # plot the training loss on a log plot
+                    ax_t4.title.set_text("Training Loss")
+                    ax_t4.scatter(range(len(losses)), losses, s=1.0)
+                    ax_t4.set_yscale('log')
+
+                    # plot the validation loss on a log plot
+                    ax_b4.title.set_text("Validation Loss")
+                    ax_b4.set_yscale('log')
+                    ax_b4.plot(val_loss_x, val_loss_y, c="Red")
 
                     # Note: calling show or pause will cause a bad time
                     # plt.show()
@@ -304,12 +394,20 @@ def main():
                     # display.display(plt.gcf())
                     print("Epoch {}, iteration {} of {} ({} %), loss={}".format(e, i, len(train_loader), 100*i//len(train_loader), losses[-1]))
 
-                    # if (global_iteration % 1000 == 0):
-                    plt_screenshot().save(log_path + "/image_" + str(global_iteration + 1) + ".jpg")
+                    if ((global_iteration + 1) % (args.plotinterval * 8)) == 0:
+                        plt_screenshot().save(log_path + "/image_" + str(global_iteration + 1) + ".jpg")
+
+                        # NOTE: this is done in the screenshot branch so that a screenshot with the final
+                        # performance is always included
+                        if args.iterations is not None and global_iteration > args.iterations:
+                            print("Done - desired iteration count was reached")
+                            return
 
                 global_iteration += 1
             if (e + 1) % 5 == 0:
-                save_network("{}_{}_model_latest.dat".format(args.experiment, timestamp))
+                if not args.nosave:
+                    save_network("{}_{}_model_latest.dat".format(args.experiment, timestamp))
+
 
         plt.close('all')
 

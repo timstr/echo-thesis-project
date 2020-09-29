@@ -42,7 +42,7 @@ def make_wave_kernel(propagation_speed, time_step, velocity_damping, velocity_di
 
     pos_to_pos = identity
 
-    pos_to_vel = (propagation_speed * propagation_speed * laplacian - 0.02 * identity) * time_step * kD
+    pos_to_vel = (propagation_speed * propagation_speed * laplacian) * time_step * kD
 
     vel_to_pos = identity * time_step
 

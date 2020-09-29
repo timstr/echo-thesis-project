@@ -4,54 +4,11 @@ import math
 
 from tensor_utils import cutout_circle, cutout_rectangle
 from wave_kernel import make_wave_kernel, pad_field
-
-def make_obstacle_map(obstacles, height, width):
-    m = torch.ones(
-        (height, width),
-        requires_grad=False,
-        dtype=torch.float32
-    )
-
-    for o in obstacles:
-        t = o[0]
-        args = o[1:]
-        n_args = len(args)
-        if (t == CIRCLE):
-            assert(n_args == 3)
-            cutout_circle(m, args[0], args[1], args[2])
-        elif (t == RECTANGLE):
-            assert(n_args == 4)
-            cutout_rectangle(m, args[0], args[1], args[2], args[3])
-    return m
-
-def overlapping(obstacle1, obstacle2):
-    t1 = obstacle1[0]
-    t2 = obstacle2[0]
-    assert(t1 == CIRCLE or t1 == RECTANGLE)
-    assert(t2 == CIRCLE or t2 == RECTANGLE)
-    args1 = obstacle1[1:]
-    args2 = obstacle2[1:]
-    if t1 == CIRCLE and t2 == CIRCLE:
-        y1, x1, r1 = args1
-        y2, x2, r2 = args2
-        d = math.hypot(y1 - y2, x1 - x2)
-        return d < r1 + r2
-    elif t1 == RECTANGLE and t2 == RECTANGLE:
-        y1, x1, h1, w1 = args1
-        y2, x2, h2, w2 = args2
-        return abs(y1 - y2) < (h1 + h2) / 2 and abs(x1 - x2) < (w1 + w2) / 2
-    else:
-        ry, rx, rw, rh = args1 if t1 == RECTANGLE else args2
-        cy, cx, cr = args1 if t1 == CIRCLE else args2
-        return abs(ry - cy) < rh / 2 + cr and abs(rx - cx) < rw / 2 + cr
-
-CIRCLE = "Circle"
-RECTANGLE = "Rectangle"
+from featurize import CIRCLE, RECTANGLE, make_random_obstacles, overlapping, make_obstacle_heatmap
 
 class Field():
-    def __init__(self, height, width):
-        self._height = height
-        self._width = width
+    def __init__(self, size):
+        self._size = size
         self._obstacles = []
         self._dirty_barrier = True
         self._wave_kernel = make_wave_kernel(
@@ -67,16 +24,13 @@ class Field():
             -0.1118448377,  0.1101172492, -0.3644709289,  0.0389745384, -0.0027823041, -0.0032603526, -0.0019526740,  0.0135646062
         ]).cuda()
         self._field = torch.zeros(
-            (1, 2, height, width),
+            (1, 2, size, size),
             requires_grad=False,
             dtype=torch.float32
         ).cuda()
 
-    def get_height(self):
-        return self._height
-
-    def get_width(self):
-        return self._width
+    def get_size(self):
+        return self._size
 
     def reset_field():
         self._field[...] = 0.0
@@ -108,7 +62,7 @@ class Field():
         if not self._dirty_barrier:
             return
 
-        self._barrier = make_obstacle_map(self._obstacles, self._height, self._width)
+        self._barrier = make_obstacle_heatmap(self._obstacles, self._size)
         self._barrier = self._barrier.unsqueeze(0).unsqueeze(0).cuda()
 
         self._dirty_barrier = False
@@ -129,39 +83,9 @@ class Field():
 
         self._field *= self._barrier
 
-        assert(self._field.shape == (1, 2, self._height, self._width))
+        assert(self._field.shape == (1, 2, self._size, self._size))
 
-def make_random_field(height, width, max_num_obstacles=10):
-    f = Field(height, width)
-    n = random.randint(1, max_num_obstacles)
-
-    def collision(shape):
-        #if overlapping(shape, (RECTANGLE, 0.9, 0.5, 0.2, 1.0)):
-        #    return True
-        for s in f.get_obstacles():
-            if (overlapping(s, shape)):
-                return True
-        return False
-
-    for _ in range(n):
-        for _ in range(100):
-            y = random.uniform(0, 0.75)
-            # y = random.uniform(0, 1)
-            x = random.uniform(0, 1)
-            if random.random() < 0.5:
-                # rectangle
-                h = random.uniform(0.01, 0.2)
-                w = random.uniform(0.01, 0.2)
-                if (collision((RECTANGLE, y, x, h, w))):
-                    continue
-                f.add_rectangle(y, x, h, w)
-                break
-            else:
-                # circle
-                r = random.uniform(0.01, 0.1)
-                if collision((CIRCLE, y, x, r)):
-                    continue
-                f.add_circle(y, x, r)
-                break
-
+def make_random_field(size, max_num_obstacles=10):
+    f = Field(size)
+    f.add_obstacles(make_random_obstacles(max_num_obstacles))
     return f

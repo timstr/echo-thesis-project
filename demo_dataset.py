@@ -39,9 +39,9 @@ def main():
         plt.imshow(make_obstacle_map(obs_list, 512, 512).cpu())
         plt.show()
 
-        # print("Obstacles signed distance field")
-        # plt.imshow(make_sdf_image_gt({'obstacles_list': obs_list}, 128), vmin=0, vmax=0.5, cmap='hsv')
-        # plt.show()
+        print("Obstacles signed distance field")
+        plt.imshow(make_sdf_image_gt({'obstacles_list': obs_list}, 128), vmin=0, vmax=0.5, cmap='hsv')
+        plt.show()
 
         # print("Depthmap (Cartesian projection)")
         # plt.plot(depthmap)
@@ -51,26 +51,50 @@ def main():
         # plt.polar(np.linspace(0, math.pi * 2.0, 128), depthmap)
         # plt.show()
 
-        print("Echo (raw)")
-        plt.cla()
-        plt.ylim(-1.0, 1.1)
-        e = echo_waveshaped
-        # e = echo_raw
+        def plot_waves(w):
+            plt.cla()
+            plt.ylim(-1.0, 1.0)
+            if (len(w.shape) > 1):
+                n = w.shape[0]
+                for i in range(n):
+                    plt.plot(w[i,:])
+            else:
+                plt.plot(w)
+            plt.show()
 
-        num_receivers = e.shape[0]
-        for i in range(num_receivers):
-            plt.plot(e[i,:])
-        # plt.plot(e[0,:])
-        plt.show()
-        plt.pause(1.0)
+        print("Echo (raw)")
+        plot_waves(echo_raw)
 
         print("Echo (waveshaped)")
-        plt.plot(echo_waveshaped[0,:])
-        plt.show()
+        plot_waves(echo_waveshaped)
 
-        print("Obstacle heatmap")
-        plt.plot(heatmap)
-        plt.show()
+
+
+        print("Echo (raw, very close to speaker)")
+        plot_waves(echo_raw[35,:])
+
+        print("Echo (waveshaped, very close to speaker)")
+        plot_waves(echo_waveshaped[35,:])
+
+
+
+        print("Echo (raw, close to speaker)")
+        plot_waves(echo_raw[32,:])
+
+        print("Echo (waveshaped, close to speaker)")
+        plot_waves(echo_waveshaped[32,:])
+
+
+
+        print("Echo (raw, far from speaker)")
+        plot_waves(echo_raw[0,:])
+
+        print("Echo (waveshaped, far from speaker)")
+        plot_waves(echo_waveshaped[0,:])
+
+        # print("Obstacle heatmap")
+        # plt.plot(heatmap)
+        # plt.show()
 
 if __name__ == "__main__":
     main()
