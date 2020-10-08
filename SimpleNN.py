@@ -5,12 +5,15 @@ import math
 from device_dict import DeviceDict
 
 class SimpleNN(nn.Module):
-    def __init__(self, num_input_channels, num_implicit_params, input_format="1D", output_format="scalar", output_resolution=None):
+    def __init__(self, num_input_channels, num_implicit_params, input_format="1D", output_format="scalar", output_resolution=None, predict_variance=False):
         super().__init__()
 
         self._num_implicit_params = num_implicit_params if num_implicit_params is not None else 0
         self._output_format = output_format
         self._output_resolution = output_resolution if output_resolution is not None else 1
+        self._predict_variance = predict_variance
+
+        assert(False) # TODO: implement predicting variance
 
         self._param_repetitions = 1
 

@@ -3,17 +3,17 @@ import torch.nn as nn
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from argparse import ArgumentParser
-import matplotlib.animation
 import matplotlib.pyplot as plt
-import numpy as np
 import math
+import numpy as np
 import datetime
 import PIL.Image
+import random
 
 from device_dict import DeviceDict
 from dataset import WaveSimDataset
 from progress_bar import progress_bar
-from featurize import make_sdf_image_gt, make_sdf_image_pred, make_receiver_indices, make_heatmap_image_gt, make_heatmap_image_pred, make_depthmap_gt, make_depthmap_pred
+from featurize import make_sdf_image_gt, make_sdf_image_pred, make_receiver_indices, make_heatmap_image_gt, make_heatmap_image_pred, make_depthmap_gt, make_depthmap_pred, make_deterministic_validation_batches_implicit, red_white_blue_banded, red_white_blue
 from custom_collate_fn import custom_collate
 
 from EchoLearnNN import EchoLearnNN
@@ -34,17 +34,18 @@ def plt_screenshot():
 def main():
     parser = ArgumentParser()
     parser.add_argument("--experiment", type=str, dest="experiment", required=True)
-    parser.add_argument("--dataset", type=str, dest="dataset", required=True)
+    parser.add_argument("--dataset", type=str, dest="dataset", default="v8")
     parser.add_argument("--numexamples", type=int, dest="numexamples", default=None)
-    parser.add_argument("--batchsize", type=int, dest="batchsize", default=64)
-    parser.add_argument("--receivers", type=int, choices=[1, 2, 4, 8, 16, 32, 64], dest="receivers", required=True)
-    parser.add_argument("--arrangement", type=str, choices=["flat", "grid"], dest="arrangement", required=True)
+    parser.add_argument("--batchsize", type=int, dest="batchsize", default=4)
+    parser.add_argument("--receivers", type=int, choices=[1, 2, 4, 8, 16, 32, 64], dest="receivers", default=8)
+    parser.add_argument("--arrangement", type=str, choices=["flat", "grid"], dest="arrangement", default="grid")
     parser.add_argument("--maxobstacles", type=int, dest="maxobstacles", default=None)
     parser.add_argument("--circlesonly", dest="circlesonly", default=False, action="store_true")
     parser.add_argument("--nosave", dest="nosave", default=False, action="store_true")
     parser.add_argument("--iterations", type=int, dest="iterations", default=None)
     parser.add_argument("--implicitfunction", dest="implicitfunction", default=False, action="store_true")
-    parser.add_argument("--gradientregularizer", dest="gradientregularizer", type=float, required=False)
+    parser.add_argument("--predictvariance", dest="predictvariance", default=False, action="store_true")
+    parser.add_argument("--resolution", type=int, dest="resolution", default=32)
     parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram"], required=True)
     parser.add_argument("--nnoutput", type=str, dest="nnoutput", choices=["sdf", "heatmap", "depthmap"], required=True)
     parser.add_argument("--simplenn", dest="simplenn", default=False, action="store_true")
@@ -76,8 +77,13 @@ def main():
         output_format = "scalar"
     else:
         implicit_params = 0
+    
+    what_my_gpu_can_handle = 128*128
 
-    output_resolution = 32 # TODO: allow this to be customized? This has some implications for the internal bandwidth of the network
+    output_dims = 2 if args.predictvariance else 1
+
+    if (args.nosave):
+        print("NOTE: networks are not being saved")
 
     ecds = WaveSimDataset(
         data_folder="dataset/{}".format(args.dataset),
@@ -88,7 +94,8 @@ def main():
         circles_only=args.circlesonly,
         input_representation=args.nninput,
         output_representation=args.nnoutput,
-        implicit_function=args.implicitfunction
+        implicit_function=args.implicitfunction,
+        dense_output_resolution=args.resolution
     )
 
     val_ratio = 1 / 8
@@ -121,79 +128,54 @@ def main():
         collate_fn=collate_fn_device
     )
 
-    # Encourages one of two things:
-    # - Either the value is zero and the gradient is zero, or
-    # - the value is nonzero and the gradient's magnitude is 1
-    # Parameters:
-    # - value: value of the function
-    # - gradient: magnitude of the derivative of the value w.r.t. its spatial coordinates
-    # - kZeroTolerance: varies the radius of the region around zero that is considered to be zero
-    def zeroZeroXOneLoss(value, gradientMag):
-        return torch.mean(torch.sqrt((value**2 + gradientMag**2) * (gradientMag - 1.0)**2))
-    
-    if (args.gradientregularizer is not None):
-        assert(args.nnoutput == "sdf")
-        if (args.implicitfunction):
-            def gradientRegularizedLoss(batch_input, batch_output):
-                x1 = batch_input["output"]
-                x2 = batch_output["output"]
-                params = batch_gpu["params"]
-                mse = torch.nn.functional.mse_loss(x1, x2)
-                grad, = torch.autograd.grad(mse, params, retain_graph=True)
-                grad_mag = torch.sqrt(torch.sum(grad**2, dim=2))
-                grad_penality = zeroZeroXOneLoss(x2, grad_mag)
-                return mse + grad_penality * args.gradientregularizer
-            loss_function = gradientRegularizedLoss
-        else:
-            def gradientRegularizedLoss(batch_input, batch_output):
-                x1 = batch_input["output"]
-                x2 = batch_output["output"]
-                mse = torch.nn.functional.mse_loss(x1, x2)
-                # NOTE: assuming the square output region has unit size, each
-                # pixel has size (1.0 / output_resolution). The following two
-                # lines are a finite-differences estimate of the image gradient,
-                # with sampling points chosen at a distance of two pixels apart
-                # (for symmetry), or (2.0 / output_resolution). The difference
-                # needs to be divided by the distance, which is equivalent
-                # to multiplying by (output_resolution / 2.0)
-                dy = (x2[:, 2:, 1:-1] - x2[:, :-2, 1:-1]) * (output_resolution / 2.0)
-                dx = (x2[:, 1:-1, 2:] - x2[:, 1:-1, :-2]) * (output_resolution / 2.0)
-                grad_mag = torch.sqrt(dy**2 + dx**2)
-                value = x2[:, 1:-1, 1:-1]
-                grad_penality = zeroZeroXOneLoss(value, grad_mag)
-                return mse + grad_penality * args.gradientregularizer
-            loss_function = gradientRegularizedLoss
-    else:
-        def bogStandardLoss(batch_input, batch_output):
-            x1 = batch_input["output"]
-            x2 = batch_output["output"]
-            return torch.nn.functional.mse_loss(x1, x2)
-        loss_function = bogStandardLoss
-        
+    def bogStandardLoss(batch_gt, batch_pred):
+        x1 = batch_gt["output"]
+        x2 = batch_pred["output"][:, 0]
+        mse = torch.nn.functional.mse_loss(x1, x2)
+        terms = { "mean_squared_error": mse }
+        return mse, terms
 
-    ##############################################
-    # Helper function to compute validation loss #
-    ##############################################
-    def compute_averaged_loss(model, loader):
-        print("Computing validation loss (MSE)...")
-        it = iter(loader)
-        losses = []
-        for i in range(len(loader)):
-            batch = next(it).to('cuda')
-            pred = model(batch)
-            depthmap_pred = pred["output"]
-            depthmap_gt = batch["output"]
-            loss = torch.nn.functional.mse_loss(depthmap_pred, depthmap_gt)
-            losses.append(loss.item())
-        print("Computing validation loss (MSE)... Done.")
-        return np.mean(np.asarray(losses))
-        
-    def training_loss(model):
-        return compute_averaged_loss(model, train_loader)
-        
+    def meanVarianceLoss(batch_gt, batch_pred):
+        y = batch_gt["output"]
+        z_hat = batch_pred["output"]
+        y_hat = z_hat[:, 0]
+        sigma_hat = z_hat[:, 1]
+        sumsqrdiff = (y - y_hat)**2
+        mse = torch.mean(sumsqrdiff)
+        mv = torch.mean(sigma_hat)
+        l = torch.mean((sumsqrdiff / (0.001 + sigma_hat)) + sigma_hat)
+        terms = { "mean_squared_error": mse, "mean_predicted_variance": mv }
+        return l, terms
+
+    
+    loss_function = meanVarianceLoss if args.predictvariance else bogStandardLoss
+    
     def validation_loss(model):
-        x = compute_averaged_loss(model, val_loader)
-        return x
+        print("Computing validation loss (MSE)...")
+        losses = []
+        for i, batch in enumerate(val_loader):
+            if args.implicitfunction:
+                num_splits = args.resolution**2 * args.batchsize // what_my_gpu_can_handle
+                batches = make_deterministic_validation_batches_implicit(batch, args.nnoutput, args.resolution, num_splits)
+                
+                losses_batch = []
+                for b in batches:
+                    b = b.to("cuda")
+                    pred = model(b)
+                    pred = pred["output"][:, 0]
+                    gt = b["output"]
+                    loss = torch.nn.functional.mse_loss(pred, gt).detach()
+                    losses_batch.append(loss.item())
+                losses.append(np.mean(np.asarray(losses_batch)))
+            else:
+                batch = batch.to("cuda")
+                pred = model(batch)
+                pred = pred["output"][:, 0]
+                gt = batch["output"]
+                loss = torch.nn.functional.mse_loss(pred, gt).detach()
+            losses.append(loss.item())
+            progress_bar(i, len(val_loader))
+        return np.mean(np.asarray(losses))
 
     NetworkType = SimpleNN if args.simplenn else EchoLearnNN
 
@@ -202,7 +184,8 @@ def main():
         num_implicit_params=implicit_params,
         input_format=input_format,
         output_format=output_format,
-        output_resolution=(None if args.implicitfunction else output_resolution)
+        output_resolution=(None if args.implicitfunction else args.resolution),
+        predict_variance=args.predictvariance
     ).cuda()
 
     def save_network(filename):
@@ -216,12 +199,14 @@ def main():
         network.load_state_dict(torch.load(filename))
         network.eval()
 
-    def plot_inputs(pltx_axis, batch):
+    cmap_heatmap = "coolwarm"
+
+    def plot_inputs(plt_axis, batch):
         the_input = batch['input'][0].detach()
         if (len(the_input.shape) == 2):
             for j in range(args.receivers):
-                pltx_axis.plot(the_input[j].detach())
-            pltx_axis.set_ylim(-1, 1)
+                plt_axis.plot(the_input[j].detach())
+            plt_axis.set_ylim(-1, 1)
         else:
             the_input_min = torch.min(the_input)
             the_input_max = torch.max(the_input)
@@ -230,50 +215,77 @@ def main():
                 the_input.unsqueeze(1).repeat(1, 3, 1, 1),
                 nrow=1
             )
-            pltx_axis.imshow(spectrogram_img_grid.permute(1, 2, 0))
+            plt_axis.imshow(spectrogram_img_grid.permute(1, 2, 0))
+            plt_axis.axis("off")
 
     def plot_ground_truth(plt_axis, batch):
         if args.nnoutput == "sdf":
-            img = make_sdf_image_gt(batch, output_resolution)
-            plt_axis.imshow(img, vmin=0, vmax=0.5, cmap='hsv')
+            img = make_sdf_image_gt(batch, args.resolution).cpu()
+            plt_axis.imshow(red_white_blue_banded(img), interpolation="bicubic")
+            plt_axis.axis("off")
         elif args.nnoutput == "heatmap":
-            img = make_heatmap_image_gt(batch, output_resolution)
-            plt_axis.imshow(img, vmin=0, vmax=1.0)
+            img = make_heatmap_image_gt(batch, args.resolution).cpu()
+            plt_axis.imshow(red_white_blue(img), interpolation="bicubic")
+            plt_axis.axis("off")
         elif args.nnoutput == "depthmap":
-            arr = make_depthmap_gt(batch, output_resolution)
+            arr = make_depthmap_gt(batch, args.resolution).cpu()
             plt_axis.plot(arr)
-            plt_axis.set_ylim(0.0, 1.0)
+            plt_axis.set_ylim(-0.5, 1.5)
         else:
             raise Exception("Unrecognized output representation")
+
+    def plot_image(plt_axis, img, display_fn):
+        y = img[0]
+        assert(y.shape == (args.resolution, args.resolution))
+        plt_axis.imshow(display_fn(y), interpolation="bicubic")
+        if (args.predictvariance):
+            sigma = img[1]
+            assert(sigma.shape == (args.resolution, args.resolution))
+            sigma_clamped = torch.clamp(sigma, 0.0, 1.0)
+            min_val = 0.01
+            sigma_log_scaled = (-1.0 / math.log(min_val)) * torch.log(min_val + (1.0 - min_val) * sigma_clamped) + 1.0
+            mask = torch.cat((
+                torch.zeros((args.resolution, args.resolution, 3)),
+                sigma_log_scaled.unsqueeze(-1),
+            ), dim=2)
+            plt_axis.imshow(mask, interpolation="bicubic")
+        plt_axis.axis("off")
+
+    def plot_depthmap(plt_axis, data):
+        y = data[0]
+        assert(y.shape == (args.resolution,))
+        plt_axis.plot(y, c="black")
+        if (args.predictvariance):
+            sigma = data[1]
+            assert(sigma.shape == (args.resolution,))
+            plt_axis.plot(y - sigma, c="red")
+            plt_axis.plot(y + sigma, c="red")
+        plt_axis.set_ylim(-0.5, 1.5)
 
     def plot_prediction(plt_axis, batch, network):
         if args.implicitfunction:
             if args.nnoutput == "sdf":
-                img = make_sdf_image_pred(batch, output_resolution, network)
-                plt_axis.imshow(img, vmin=0, vmax=0.5, cmap='hsv')
+                num_splits = args.resolution**2 // what_my_gpu_can_handle
+                img = make_sdf_image_pred(batch, args.resolution, network, num_splits, args.predictvariance)
+                plot_image(plt_axis, img, red_white_blue_banded)
             elif args.nnoutput == "heatmap":
-                img = make_heatmap_image_pred(batch, output_resolution, network)
-                plt_axis.imshow(img, vmin=0, vmax=1.0)
+                num_splits = args.resolution**2 // what_my_gpu_can_handle
+                img = make_heatmap_image_pred(batch, args.resolution, network, num_splits, args.predictvariance)
+                plot_image(plt_axis, img, red_white_blue)
             elif args.nnoutput == "depthmap":
-                arr = make_depthmap_pred(batch, output_resolution, network)
-                plt_axis.plot(arr)
-                plt_axis.set_ylim(-0.1, 1.1)
+                arr = make_depthmap_pred(batch, args.resolution, network)
+                plot_depthmap(plt_axis, arr)
             else:
                 raise Exception("Unrecognized output representation")
         else:
             # non-implicit function
-            output = network(batch)['output'][0].detach().cpu().numpy()
+            output = network(batch)['output'][0].detach().cpu()
             if args.nnoutput == "sdf":
-                assert(output.shape == (output_resolution, output_resolution))
-                plt_axis.imshow(output, vmin=0, vmax=0.5, cmap='hsv')
+                plot_image(plt_axis, output, red_white_blue_banded)
             elif args.nnoutput == "heatmap":
-                assert(output.shape == (output_resolution, output_resolution))
-                plt_axis.imshow(output, vmin=0, vmax=1.0)
+                plot_image(plt_axis, output, red_white_blue)
             elif args.nnoutput == "depthmap":
-                assert(len(output.shape) == 1)
-                assert(output.shape[0] == output_resolution)
-                plt_axis.plot(output)
-                plt_axis.set_ylim(-0.1, 1.1)
+                plot_depthmap(plt_axis, output)
             else:
                 raise Exception("Unrecognized output representation")
 
@@ -287,7 +299,8 @@ def main():
 
         plt.ion()
 
-        fig, axes = plt.subplots(2, 4, figsize=(16, 6), dpi=100)
+        fig, axes = plt.subplots(2, 4, figsize=(22, 10), dpi=80)
+        fig.tight_layout(rect=(0.0, 0.05, 1.0, 0.95))
 
         ax_t1 = axes[0,0]
         ax_t2 = axes[0,1]
@@ -297,9 +310,6 @@ def main():
         ax_b3 = axes[1,2]
         ax_t4 = axes[0,3]
         ax_b4 = axes[1,3]
-
-        if (args.nosave):
-            print("NOTE: networks are not being saved")
 
         num_epochs = 1000000
         losses = []
@@ -316,13 +326,15 @@ def main():
                 pred_gpu = network(batch_gpu)
                 pred_cpu = pred_gpu.to('cpu')
                 
-                loss = loss_function(pred_gpu, batch_gpu)
+                loss, loss_terms = loss_function(batch_gpu, pred_gpu)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 losses.append(loss.item())
 
                 writer.add_scalar("training loss", loss.item(), global_iteration)
+                for k in loss_terms.keys():
+                    writer.add_scalar(k, loss_terms[k].item(), global_iteration)
                 
                 progress_bar((global_iteration) % args.plotinterval, args.plotinterval)
 
@@ -332,6 +344,9 @@ def main():
                         best_val_loss = curr_val_loss
                         if not args.nosave:
                             save_network("{}_{}_model_best.dat".format(args.experiment, timestamp))
+                            
+                    if not args.nosave:
+                        save_network("{}_{}_model_latest.dat".format(args.experiment, timestamp))
 
 
                     val_loss_x.append(len(losses))
@@ -340,7 +355,6 @@ def main():
                     writer.add_scalar("validation loss", curr_val_loss, global_iteration)
 
                 if ((global_iteration + 1) % args.plotinterval) == 0:
-                    print("")
                     val_batch_cpu = next(iter(val_loader))
                     val_batch_gpu = val_batch_cpu.to('cuda')
 
@@ -354,24 +368,24 @@ def main():
                     ax_t4.cla()
                     ax_b4.cla()
 
-                    plt.gcf().suptitle(args.experiment)
+                    # plt.gcf().suptitle(args.experiment)
                         
                     # plot the input waveforms
                     ax_t1.title.set_text("Input (train)")
                     plot_inputs(ax_t1, batch_cpu)
-                    ax_b1.title.set_text("Input (val.)")
+                    ax_b1.title.set_text("Input (validation)")
                     plot_inputs(ax_b1, val_batch_cpu)
                     
                     # plot the ground truth obstacles
                     ax_t2.title.set_text("Ground Truth (train)")
                     plot_ground_truth(ax_t2, batch_cpu)
-                    ax_b2.title.set_text("Ground Truth (val.)")
+                    ax_b2.title.set_text("Ground Truth (validation)")
                     plot_ground_truth(ax_b2, val_batch_cpu)
                     
                     # plot the predicted sdf
                     ax_t3.title.set_text("Prediction (train)")
                     plot_prediction(ax_t3, batch_gpu, network)
-                    ax_b3.title.set_text("Prediction (val.)")
+                    ax_b3.title.set_text("Prediction (validation)")
                     plot_prediction(ax_b3, val_batch_gpu, network)
                     
                     # plot the training loss on a log plot
@@ -385,9 +399,7 @@ def main():
                     ax_b4.plot(val_loss_x, val_loss_y, c="Red")
 
                     # Note: calling show or pause will cause a bad time
-                    # plt.show()
-                    # plt.pause(0.001)
-                    plt.gcf().canvas.flush_events()
+                    fig.canvas.flush_events()
                     
                     # clear output window and display updated figure
                     # display.clear_output(wait=True)
@@ -395,7 +407,7 @@ def main():
                     print("Epoch {}, iteration {} of {} ({} %), loss={}".format(e, i, len(train_loader), 100*i//len(train_loader), losses[-1]))
 
                     if ((global_iteration + 1) % (args.plotinterval * 8)) == 0:
-                        plt_screenshot().save(log_path + "/image_" + str(global_iteration + 1) + ".jpg")
+                        plt_screenshot().save(log_path + "/image_" + str(global_iteration + 1) + ".png")
 
                         # NOTE: this is done in the screenshot branch so that a screenshot with the final
                         # performance is always included
@@ -404,10 +416,6 @@ def main():
                             return
 
                 global_iteration += 1
-            if (e + 1) % 5 == 0:
-                if not args.nosave:
-                    save_network("{}_{}_model_latest.dat".format(args.experiment, timestamp))
-
 
         plt.close('all')
 

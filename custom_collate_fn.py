@@ -31,7 +31,6 @@ def custom_collate(batch):
         return torch.stack(batch, 0, out=out)
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':
-        elem = batch[0]
         if elem_type.__name__ == 'ndarray':
             # array of string classes and object
             if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
@@ -58,6 +57,6 @@ def custom_collate(batch):
         # this updated version keeps the list
         # in order.
         ##########################################
-        return [custom_collate(samples) for samples in elem]
+        return [[custom_collate(samples) for samples in x] for x in batch]
 
     raise TypeError(default_collate_err_msg_format.format(elem_type))

@@ -49,23 +49,95 @@ def normalize_amplitude(waveform):
         waveform = (0.5 / max_amp) * waveform
     return waveform
 
-def shortest_distance_to_obstacles(obs, y, x):
-    def min_dist(o):
-        t, oy, ox = o[:3]
-        rest = o[3:]
-        if (t == CIRCLE):
-            r = rest[0]
-            return max(0.0, math.hypot(y - oy, x - ox) - r)
-        elif (t == RECTANGLE):
-            rh, rw = rest
-            rh *= 0.5
-            rw *= 0.5
-            dy = max(0.0, max((oy - rh) - y, y - (oy + rh)))
-            dx = max(0.0, max((ox - rw) - x, x - (ox + rw)))
-            return math.hypot(dy, dx)
-        else:
-            assert(False)
-    return min(map(min_dist, obs))
+def sdf_batch_circle(coordinates_yx_batch, circle_y, circle_x, circle_r):
+    assert(len(coordinates_yx_batch.shape) == 2)
+    assert(coordinates_yx_batch.shape[0] == 2)
+    dev = coordinates_yx_batch.device
+    circle_yx = torch.tensor([circle_y, circle_x]).unsqueeze(-1).to(dev)
+    return torch.sqrt(torch.sum((coordinates_yx_batch - circle_yx)**2, dim=0)) - circle_r
+
+def sdf_batch_rectangle(coordinates_yx_batch, rect_y, rect_x, rect_h, rect_w):
+    assert(len(coordinates_yx_batch.shape) == 2)
+    assert(coordinates_yx_batch.shape[0] == 2)
+    dev = coordinates_yx_batch.device
+    rect_yx = torch.tensor([rect_y, rect_x]).unsqueeze(-1).to(dev)
+    rect_hw_halved = torch.tensor([rect_h * 0.5, rect_w * 0.5]).unsqueeze(-1).to(dev)
+    edgeDisp = torch.abs(coordinates_yx_batch - rect_yx) - rect_hw_halved
+    outerDist = torch.sqrt(torch.sum(torch.clamp(edgeDisp, min=0.0)**2, dim=0))
+    innerDist = torch.clamp(torch.max(edgeDisp, dim=0)[0], max=0.0)
+    return outerDist + innerDist
+
+def sdf_batch_one_shape(coordinates_yx_batch, shape_tuple):
+    ty, y, x = shape_tuple[:3]
+    params = shape_tuple[3:]
+    if ty == CIRCLE:
+        r, = params
+        return sdf_batch_circle(coordinates_yx_batch, y, x, r)
+    elif ty == RECTANGLE:
+        h, w = params
+        return sdf_batch_rectangle(coordinates_yx_batch, y, x, h, w)
+    else:
+        raise Exception("Unknown shape type")
+
+def sdf_batch(coordinates_yx_batch, obs):
+    assert(len(obs) > 0)
+    vals = sdf_batch_one_shape(coordinates_yx_batch, obs[0])
+    for o in obs[1:]:
+        vals = torch.min(
+            torch.stack((
+                vals,
+                sdf_batch_one_shape(coordinates_yx_batch, o)
+            ), dim=1),
+            dim=1
+        )[0]
+    return vals
+
+def heatmap_batch_circle(coordinates_yx_batch, circle_y, circle_x, circle_r):
+    assert(len(coordinates_yx_batch.shape) == 2)
+    assert(coordinates_yx_batch.shape[0] == 2)
+    dev = coordinates_yx_batch.device
+    circle_yx = torch.tensor([circle_y, circle_x]).unsqueeze(-1).to(dev)
+    dists = torch.sum((coordinates_yx_batch - circle_yx)**2, dim=0)
+    ret = torch.zeros(coordinates_yx_batch.shape[1])
+    ret[dists <= circle_r**2] = 1.0
+    return ret
+
+def heatmap_batch_rectangle(coordinates_yx_batch, rect_y, rect_x, rect_h, rect_w):
+    assert(len(coordinates_yx_batch.shape) == 2)
+    assert(coordinates_yx_batch.shape[0] == 2)
+    dev = coordinates_yx_batch.device
+    rect_yx = torch.tensor([rect_y, rect_x]).unsqueeze(-1).to(dev)
+    abs_disps = torch.abs(coordinates_yx_batch - rect_yx)
+    ret = torch.zeros(coordinates_yx_batch.shape[1])
+    inside_y = abs_disps[0] < (rect_h * 0.5)
+    inside_x = abs_disps[1] < (rect_w * 0.5)
+    ret[inside_y * inside_x] = 1.0
+    return ret
+
+def heatmap_batch_one_shape(coordinates_yx_batch, shape_tuple):
+    ty, y, x = shape_tuple[:3]
+    params = shape_tuple[3:]
+    if ty == CIRCLE:
+        r, = params
+        return heatmap_batch_circle(coordinates_yx_batch, y, x, r)
+    elif ty == RECTANGLE:
+        h, w = params
+        return heatmap_batch_rectangle(coordinates_yx_batch, y, x, h, w)
+    else:
+        raise Exception("Unknown shape type")
+
+def heatmap_batch(coordinates_yx_batch, obs):
+    assert(len(obs) > 0)
+    vals = heatmap_batch_one_shape(coordinates_yx_batch, obs[0])
+    for o in obs[1:]:
+        vals = torch.max(
+            torch.stack((
+                vals,
+                heatmap_batch_one_shape(coordinates_yx_batch, o)
+            ), dim=1),
+            dim=1
+        )[0]
+    return vals
 
 def intersect_line_segment(ry, rx, dy, dx, p1y, p1x, p2y, p2x):
     """
@@ -197,35 +269,88 @@ def distance_along_line_of_sight(obs, ry, rx, dy, dx, no_collision_val=None):
 def line_of_sight_from_bottom_up(obs, position):
     return distance_along_line_of_sight(obs, 1.0, position, -1.0, 0.0, 1.0)
 
-def make_sdf_image_pred(example, img_size, network):
+def make_image_pred(example, img_size, network, num_splits, predict_variance):
+    num_dims = 2 if predict_variance else 1
+    outputs = torch.zeros(num_dims, img_size**2)
+    assert(img_size**2 % num_splits) == 0
+    split_size = img_size**2 // num_splits
     xy_locations = torch.stack(torch.meshgrid(
         torch.linspace(0, 1, img_size),
         torch.linspace(0, 1, img_size)
     ), dim=2).cuda().reshape(1, img_size**2, 2)
-    example['params'] = xy_locations
-    example['input'] = example['input'][:1]
-    pred = network(example)['output']
-    assert(pred.shape == (1, img_size**2))
-    return pred.reshape(img_size, img_size).detach().cpu().numpy()
+    d = DeviceDict({
+        "input": example["input"][:1],
+        
+    })
+    for i in range(num_splits):
+        begin = i * split_size
+        end = (i + 1) * split_size
+        d["params"] = xy_locations[:, begin:end]
+        pred = network(d)["output"]
+        assert(pred.shape == (1, num_dims, split_size))
+        outputs[:, begin:end] = pred.reshape(num_dims, split_size).detach()
+        pred = None
+    return outputs.reshape(num_dims, img_size, img_size).detach().cpu()
+
+def make_sdf_image_pred(example, img_size, network, num_splits, predict_variance):
+    return make_image_pred(example, img_size, network, num_splits, predict_variance)
 
 def make_sdf_image_gt(example, img_size):
-    obs = example['obstacles_list']
-    arr = torch.zeros((img_size, img_size))
-    for i, y in enumerate(np.linspace(0, 1, img_size)):
-        for j, x in enumerate(np.linspace(0, 1, img_size)):
-            arr[i,j] = shortest_distance_to_obstacles(obs, y, x)
-    return arr
-    
-def make_heatmap_image_pred(example, img_size, network):
-    return make_sdf_image_pred(example, img_size, network)
+    obs = example["obstacles_list"][0]
+
+    ls = torch.linspace(0, 1, img_size)
+    coordinates_yx = torch.stack(
+        torch.meshgrid(ls, ls),
+        dim=2
+    ).reshape(img_size**2, 2).permute(1, 0).cuda()
+
+    return sdf_batch(coordinates_yx, obs).reshape(img_size, img_size)
+
+def red_white_blue_banded(img):
+    assert(len(img.shape) == 2)
+    img = img * 5.0
+    r = torch.clamp(img + 1.0, min=0.0, max=1.0)
+    g = torch.clamp(1.0 - torch.abs(img), min=0.0, max=1.0)
+    b = torch.clamp(-img + 1.0, min=0.0, max=1.0)
+    x = 0.5 + img * 5.0
+    x = torch.clamp(1.0 * 5.0 * torch.abs(1.0 - 2.0 * (x - torch.floor(x))), min=0.0, max=1.0)
+    rgb = torch.stack(
+        (r, g, b),
+        dim=2
+    ) * (0.5 + 0.5 * x.unsqueeze(-1))
+    z = torch.clamp(1.0 - 50.0 * torch.abs(img), min=0.0, max=1.0).unsqueeze(-1)
+    z_color = torch.tensor([0.0, 0.5, 0.0]).unsqueeze(0).unsqueeze(0).to(img.device)
+    rgb = rgb + (z_color - rgb) * z
+    return rgb
+
+def red_white_blue(img):
+    assert(len(img.shape) == 2)
+    img = img * 2.0 - 1.0
+    r = torch.clamp(img + 1.0, min=0.0, max=1.0)
+    g = torch.clamp(1.0 - torch.abs(img), min=0.0, max=1.0)
+    b = torch.clamp(-img + 1.0, min=0.0, max=1.0)
+    rgb = torch.stack(
+        (r, g, b),
+        dim=2
+    )
+    return rgb
+
+def make_heatmap_image_pred(example, img_size, network, num_splits, predict_variance):
+    return make_image_pred(example, img_size, network, num_splits, predict_variance)
 
 def make_heatmap_image_gt(example, img_size):
-    arr = make_sdf_image_gt(example, img_size)
-    arr = 1.0 - torch.clamp(arr * img_size, 0.0, 1.0) # create some blurring/anti-aliasing right on obstacle boundaries
-    return arr
+    obs = example["obstacles_list"][0]
+
+    ls = torch.linspace(0, 1, img_size)
+    coordinates_yx = torch.stack(
+        torch.meshgrid(ls, ls),
+        dim=2
+    ).reshape(img_size**2, 2).permute(1, 0).cuda()
+
+    return heatmap_batch(coordinates_yx, obs).reshape(img_size, img_size)
 
 def make_depthmap_gt(example, img_size):
-    obs = example['obstacles_list']
+    obs = example["obstacles_list"][0]
     arr = torch.zeros((img_size))
     for i, x in enumerate(np.linspace(0.0, 1.0, img_size)):
         arr[i] = line_of_sight_from_bottom_up(obs, x)
@@ -233,11 +358,16 @@ def make_depthmap_gt(example, img_size):
 
 def make_depthmap_pred(example, img_size, network):
     locations = torch.linspace(0, 1, img_size).reshape(1, img_size, 1).cuda()
-    example['params'] = locations
-    example['input'] = example['input'][:1]
-    pred = network(example)['output']
-    assert(pred.shape == (1, img_size))
-    return pred.reshape(img_size).detach().cpu().numpy()
+    d = DeviceDict({
+        "input": example["input"][:1],
+        "params": locations
+    })
+    pred = network(d)["output"]
+    assert(len(pred.shape) == 3)
+    assert(pred.shape[0] == 1)
+    outputDims = pred.shape[1]
+    assert(pred.shape[2] == img_size)
+    return pred.reshape(outputDims, img_size).detach().cpu()
 
 def center_and_undelay_signal(echo_signal, y, x):
     """Shifts the input signal in time so that the expected time of wave arrival at the given location is always at the start of the signal"""
@@ -359,3 +489,71 @@ def make_random_obstacles(max_num_obstacles=10):
                 obs.append(o)
                 break
     return obs
+
+def make_implicit_params_train(num, representation):
+    dim = 1 if (representation == "depthmap") else 2
+    return torch.rand(num, dim)
+    
+def make_implicit_params_validation(img_size, representation):
+    ls = torch.linspace(0, 1, img_size)
+    if (representation == "depthmap"):
+        return ls.reshape(1, img_size, 1)
+    return torch.stack(
+        torch.meshgrid(ls, ls),
+        dim=2
+    ).cuda().reshape(1, img_size**2, 2)
+
+def make_implicit_outputs(obs, params, representation):
+    assert(len(params.shape) == 2)
+    if representation == "sdf":            
+        assert(params.shape[1] == 2)
+        return sdf_batch(params.permute(1, 0), obs)
+    elif representation == "heatmap":
+        assert(params.shape[1] == 2)
+        return heatmap_batch(params.permute(1, 0), obs)
+    elif representation == "depthmap":   
+        assert(params.shape[1] == 1) 
+        num = params.shape[0]
+        output = torch.zeros(num)
+        # CPU implementation for now :(
+        for i in range(num):
+            p = params[i]
+            v = torline_of_sight_from_bottom_up(obs, p[0])
+            output[i] = torch.tensor(v)
+        return output
+    else:
+        raise Exception("Unrecognized representation")
+
+def make_dense_outputs(obs, representation, img_size):
+    theDict = DeviceDict({ "obstacles_list": [obs]})
+    if representation == "sdf":
+        output = make_sdf_image_gt(theDict, img_size)
+        assert(output.shape == (img_size, img_size))
+    elif representation == "heatmap":
+        output = make_heatmap_image_gt(theDict, img_size)
+        assert(output.shape == (img_size, img_size))
+    elif representation == "depthmap":
+        output = make_depthmap_gt(theDict, img_size)
+        assert(len(output.shape) == 1)
+        assert(output.shape[0] == img_size)
+    return output
+
+def make_deterministic_validation_batches_implicit(example, representation, img_size, num_splits):
+    params = make_implicit_params_validation(img_size, representation)
+    obsobs = example["obstacles_list"]
+
+    assert(img_size**2 % num_splits == 0)
+    split_size = img_size**2 // num_splits
+
+    batches = []
+    for i in range(num_splits):
+        output = torch.zeros(len(obsobs), split_size)
+        for j, obs in enumerate(obsobs):
+            begin = i * split_size
+            end = (i + 1) * split_size
+            output[j] = make_implicit_outputs(obs, params[0, begin:end], representation)
+        d = DeviceDict(example.copy())
+        d["params"] = params[:, begin:end].repeat(len(obsobs), 1, 1)
+        d["output"] = output
+        batches.append(d)
+    return batches

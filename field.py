@@ -6,6 +6,8 @@ from tensor_utils import cutout_circle, cutout_rectangle
 from wave_kernel import make_wave_kernel, pad_field
 from featurize import CIRCLE, RECTANGLE, make_random_obstacles, overlapping, make_obstacle_heatmap
 
+# TODO: test whether doing convolutions in-place is faster (e.g. using torch's `out` parameters)
+
 class Field():
     def __init__(self, size):
         self._size = size

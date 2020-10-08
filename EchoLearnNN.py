@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import math
 from functools import reduce
 
 def prod(iterable, start=1):
@@ -23,13 +24,14 @@ class Reshape(nn.Module):
         return x.view(B, *self._output_shape)
 
 class EchoLearnNN(nn.Module):
-    def __init__(self, num_input_channels, num_implicit_params, input_format="1D", output_format="scalar", output_resolution=None):
+    def __init__(self, num_input_channels, num_implicit_params, input_format="1D", output_format="scalar", output_resolution=None, predict_variance=False):
         super().__init__()
 
         self._num_implicit_params = num_implicit_params if num_implicit_params is not None else 0
         self._output_format = output_format
         self._output_resolution = output_resolution
-        assert(output_resolution is None or output_resolution == 32) # HACK
+        self._predict_variance = predict_variance
+        self._output_dim = 2 if self._predict_variance else 1
 
         assert(input_format in ["1D", "2D"])
 
@@ -74,7 +76,6 @@ class EchoLearnNN(nn.Module):
                 padding=0,
                 output_padding=0
             )
-
 
         def makeConvSame(in_channels, out_channels, size, fmt, activation=True):
             assert(size % 2 == 1)
@@ -123,6 +124,7 @@ class EchoLearnNN(nn.Module):
         # pooling layer: summary statistics of 32 channels across 64 pixels
         # resulting in 32 channels x 4 statistics = 128 features
 
+
         self.fullyConnected = nn.Sequential(
             makeFullyConnected(fcInputs + self._num_implicit_params, 128),
             makeFullyConnected(128, 128),
@@ -131,26 +133,39 @@ class EchoLearnNN(nn.Module):
         )
 
         if self._output_format == "scalar":
-            self.final = makeFullyConnected(512, 1, activation=False)
+            self.final = makeFullyConnected(512, self._output_dim, activation=False)
         elif self._output_format == "1D":
+            assert(self._output_resolution >= 16)
+            convsFlex = ()
+            output_size = 16
+            while output_size < self._output_resolution:
+                convsFlex += (
+                    makeConvUp(32, 32, 2, "1D"),
+                    makeConvSame(32, 32, 3, "1D")
+                )
+                output_size *= 2
             self.final = nn.Sequential(
-                Reshape((512,), (64, 8)),
-                makeConvUp(64, 32, 2, "1D"),
-                makeConvSame(32, 32, 3, "1D"),
-                makeConvUp(32, 16, 2, "1D"),
-                makeConvSame(16, 16, 3, "1D"),
-                makeConvSame(16, 1, 1, "1D", activation=False),
-                Reshape((1, 32), (32,))
+                Reshape((512,), (64, 8)),    # 8
+                makeConvUp(64, 32, 2, "1D"), # 16
+                *convsFlex,                      # (final size)
+                makeConvSame(32, self._output_dim, 1, "1D", activation=False),
             )
         elif self._output_format == "2D":
+            assert(self._output_resolution >= 8)
+            convsFlex = ()
+            output_size = 16
+            while output_size < self._output_resolution:
+                convsFlex += (
+                    makeConvUp(32, 32, 2, "2D"),
+                    makeConvSame(32, 32, 3, "2D")
+                )
+                output_size *= 2
             self.final = nn.Sequential(
-                Reshape((512,), (32, 4, 4)),
-                makeConvUp(32, 32, 4, "2D"),
-                makeConvSame(32, 32, 3, "2D"),
-                makeConvUp(32, 16, 2, "2D"),
-                makeConvSame(16, 16, 3, "2D"),
-                makeConvSame(16, 1, 1, "2D", activation=False),
-                Reshape((1, 32, 32), (32, 32))
+                Reshape((512,), (32, 4, 4)),   # 4x4
+                makeConvUp(32, 32, 4, "2D"),   # 16x16
+                makeConvSame(32, 32, 3, "2D"), # 16x16
+                *convsFlex,                        # (final size)
+                makeConvSame(32, self._output_dim, 1, "2D", activation=False),
             )
         else:
             raise Exception("Unrecognized output format")
@@ -225,13 +240,19 @@ class EchoLearnNN(nn.Module):
             )
 
             outputs_flat = self.final(self.fullyConnected(inputs_flat))
+            output = outputs_flat.reshape(B, param_batch_size, self._output_dim)
+            output = output.permute(0, 2, 1)
+            assert(output.shape == (B, self._output_dim, param_batch_size))
+        else:
+            v0 = summary_stats
+            output = self.final(self.fullyConnected(v0))
+            assert(output.shape == (B, self._output_dim, self._output_resolution, self._output_resolution))
 
-            output = outputs_flat.reshape(B, param_batch_size)
+        assert(output.shape[1] == self._output_dim)
+        if (self._predict_variance):
+            output = torch.cat((
+                output[:, 0:1],
+                torch.exp(output[:, 1:2]),
+            ), dim=1)
 
-            return DeviceDict({'output': output})
-
-        v0 = summary_stats
-
-        vfinal = self.final(self.fullyConnected(v0))
-
-        return DeviceDict({'output': vfinal})
+        return DeviceDict({'output': output})
