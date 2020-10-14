@@ -270,6 +270,7 @@ def line_of_sight_from_bottom_up(obs, position):
     return distance_along_line_of_sight(obs, 1.0, position, -1.0, 0.0, 1.0)
 
 def make_image_pred(example, img_size, network, num_splits, predict_variance):
+    num_splits = max(num_splits, 1)
     num_dims = 2 if predict_variance else 1
     outputs = torch.zeros(num_dims, img_size**2)
     assert(img_size**2 % num_splits) == 0
@@ -539,6 +540,7 @@ def make_dense_outputs(obs, representation, img_size):
     return output
 
 def make_deterministic_validation_batches_implicit(example, representation, img_size, num_splits):
+    num_splits = max(num_splits, 1)
     params = make_implicit_params_validation(img_size, representation)
     obsobs = example["obstacles_list"]
 
