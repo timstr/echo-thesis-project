@@ -78,7 +78,7 @@ def main():
     else:
         implicit_params = 0
     
-    what_my_gpu_can_handle = 128*128
+    what_my_gpu_can_handle = 128**2
 
     output_dims = 2 if args.predictvariance else 1
 
@@ -140,13 +140,20 @@ def main():
         z_hat = batch_pred["output"]
         y_hat = z_hat[:, 0]
         sigma_hat = z_hat[:, 1]
-        sumsqrdiff = (y - y_hat)**2
-        mse = torch.mean(sumsqrdiff)
-        mv = torch.mean(sigma_hat)
-        l = torch.mean((sumsqrdiff / (0.001 + sigma_hat)) + sigma_hat)
-        terms = { "mean_squared_error": mse, "mean_predicted_variance": mv }
-        return l, terms
 
+        sqrt2pi = math.sqrt(2.0 * np.pi)
+        squared_error = (y - y_hat)**2
+
+        log_numerator = -squared_error / (2.0 * sigma_hat**2)
+        log_denominator = torch.log(sqrt2pi * sigma_hat)
+        log_phi = log_numerator - log_denominator
+        nll = torch.mean(-log_phi)
+        terms = {
+            "mean_squared_error": torch.mean(squared_error).detach(),
+            "mean_predicted_variance": torch.mean(sigma_hat).detach(),
+            "negative_log_likelihood": nll.detach()
+        }
+        return nll, terms
     
     loss_function = meanVarianceLoss if args.predictvariance else bogStandardLoss
     
@@ -242,11 +249,11 @@ def main():
             sigma = img[1]
             assert(sigma.shape == (args.resolution, args.resolution))
             sigma_clamped = torch.clamp(sigma, 0.0, 1.0)
-            min_val = 0.01
-            sigma_log_scaled = (-1.0 / math.log(min_val)) * torch.log(min_val + (1.0 - min_val) * sigma_clamped) + 1.0
+            gamma_value = 0.5
+            sigma_curved = sigma_clamped**gamma_value
             mask = torch.cat((
                 torch.zeros((args.resolution, args.resolution, 3)),
-                sigma_log_scaled.unsqueeze(-1),
+                sigma_curved.unsqueeze(-1),
             ), dim=2)
             plt_axis.imshow(mask, interpolation="bicubic")
         plt_axis.axis("off")
