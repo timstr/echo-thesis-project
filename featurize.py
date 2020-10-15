@@ -326,15 +326,15 @@ def red_white_blue_banded(img):
 
 def red_white_blue(img):
     assert(len(img.shape) == 2)
-    img = img * 2.0 - 1.0
-    r = torch.clamp(img + 1.0, min=0.0, max=1.0)
-    g = torch.clamp(1.0 - torch.abs(img), min=0.0, max=1.0)
-    b = torch.clamp(-img + 1.0, min=0.0, max=1.0)
-    rgb = torch.stack(
-        (r, g, b),
-        dim=2
-    )
-    return rgb
+    img = img.unsqueeze(-1)
+    close_to_one  = torch.clamp((2.0 * img - 1.0), 0.0, 1.0)
+    close_to_half = torch.clamp((1.0 - 2.0 * torch.abs(img - 0.5)), 0.0, 1.0)
+    close_to_zero = torch.clamp((1.0 - 2.0 * img), 0.0, 1.0)
+    red   = torch.tensor([0.71, 0.01, 0.15]).reshape(1, 1, 3)
+    white = torch.tensor([1.00, 1.00, 1.00]).reshape(1, 1, 3)
+    blue  = torch.tensor([0.23, 0.30, 0.75]).reshape(1, 1, 3)
+    return close_to_one * red + close_to_half * white + close_to_zero * blue
+    
 
 def make_heatmap_image_pred(example, img_size, network, num_splits, predict_variance):
     return make_image_pred(example, img_size, network, num_splits, predict_variance)
@@ -348,7 +348,8 @@ def make_heatmap_image_gt(example, img_size):
         dim=2
     ).reshape(img_size**2, 2).permute(1, 0).cuda()
 
-    return heatmap_batch(coordinates_yx, obs).reshape(img_size, img_size)
+    # return heatmap_batch(coordinates_yx, obs).reshape(img_size, img_size)
+    return torch.clamp(img_size * -sdf_batch(coordinates_yx, obs), 0.0, 1.0).reshape(img_size, img_size)
 
 def make_depthmap_gt(example, img_size):
     obs = example["obstacles_list"][0]
