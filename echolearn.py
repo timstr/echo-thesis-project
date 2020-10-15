@@ -1,3 +1,8 @@
+# The following fixes a zombie command line
+# Credit goes to https://stackoverflow.com/a/44822794/5023438
+import os
+os.environ["FOR_DISABLE_CONSOLE_CTRL_HANDLER"] = "1"
+
 import torch
 import torch.nn as nn
 import torchvision
@@ -426,5 +431,10 @@ def main():
 
         plt.close('all')
 
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # I don't wanna see any stack traces
+        pass
