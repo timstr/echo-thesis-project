@@ -1,5 +1,6 @@
 __pycache__/
 dataset/
+sim_params/
 logs/
 *.mp4
 *.wav

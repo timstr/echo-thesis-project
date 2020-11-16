@@ -49,6 +49,7 @@ def main():
     parser.add_argument("--nosave", dest="nosave", default=False, action="store_true")
     parser.add_argument("--iterations", type=int, dest="iterations", default=None)
     parser.add_argument("--implicitfunction", dest="implicitfunction", default=False, action="store_true")
+    parser.add_argument("--importancesampling", dest="importancesampling", default=False, action="store_true")
     parser.add_argument("--predictvariance", dest="predictvariance", default=False, action="store_true")
     parser.add_argument("--resolution", type=int, dest="resolution", default=32)
     parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram"], required=True)
@@ -100,6 +101,7 @@ def main():
         input_representation=args.nninput,
         output_representation=args.nnoutput,
         implicit_function=args.implicitfunction,
+        use_importance_sampling=args.importancesampling,
         dense_output_resolution=args.resolution
     )
 
@@ -144,21 +146,33 @@ def main():
         y = batch_gt["output"]
         z_hat = batch_pred["output"]
         y_hat = z_hat[:, 0]
-        sigma_hat = z_hat[:, 1]
+        sigma_hat_inverse = z_hat[:, 1]
 
         sqrt2pi = math.sqrt(2.0 * np.pi)
         squared_error = (y - y_hat)**2
 
-        log_numerator = -squared_error / (2.0 * sigma_hat**2)
-        log_denominator = torch.log(sqrt2pi * sigma_hat)
+        #     phi(y|x)  = exp(-(y - y_hat)^2/(2*sigma^2))
+        #                     / (sqrt(2*pi)*sigma)
+        # log(phi(y|x)) = -(y - y_hat)^2 / (2*sigma^2)
+        #                     - log(sqrt(2*pi)*sigma)
+        #               = -0.5 * (y - y_hat)^2 / sigma^2
+        #                     - (log(sqrt(2*pi)) + log(sigma))
+        #               = -0.5 * (y - y_hat)^2 * (1/sigma)^2
+        #                     - (log(sqrt(2*pi)) - log(1/sigma))
+
+
+        log_numerator = -0.5 * squared_error * sigma_hat_inverse**2
+        log_denominator = math.log(sqrt2pi) - torch.log(sigma_hat_inverse)
         log_phi = log_numerator - log_denominator
         nll = torch.mean(-log_phi)
         terms = {
             "mean_squared_error": torch.mean(squared_error).detach(),
-            "mean_predicted_variance": torch.mean(sigma_hat).detach(),
+            "mean_predicted_variance": torch.mean(1.0/sigma_hat_inverse).detach(),
             "negative_log_likelihood": nll.detach()
         }
         return nll, terms
+
+
     
     loss_function = meanVarianceLoss if args.predictvariance else bogStandardLoss
     
@@ -230,19 +244,26 @@ def main():
             plt_axis.imshow(spectrogram_img_grid.permute(1, 2, 0))
             plt_axis.axis("off")
 
-    def plot_ground_truth(plt_axis, batch):
+    def plot_ground_truth(plt_axis, batch, show_samples=False):
         if args.nnoutput == "sdf":
             img = make_sdf_image_gt(batch, args.resolution).cpu()
             plt_axis.imshow(red_white_blue_banded(img), interpolation="bicubic")
             plt_axis.axis("off")
+            if show_samples and args.implicitfunction:
+                yx = batch["params"][0].detach() * args.resolution
+                plt_axis.scatter(yx[:,1], yx[:,0], s=1.0)
         elif args.nnoutput == "heatmap":
             img = make_heatmap_image_gt(batch, args.resolution).cpu()
             plt_axis.imshow(red_white_blue(img), interpolation="bicubic")
             plt_axis.axis("off")
+            if show_samples and args.implicitfunction:
+                yx = batch["params"][0].detach() * args.resolution
+                plt_axis.scatter(yx[:,1], yx[:,0], s=1.0)
         elif args.nnoutput == "depthmap":
             arr = make_depthmap_gt(batch, args.resolution).cpu()
             plt_axis.plot(arr)
             plt_axis.set_ylim(-0.5, 1.5)
+            # TODO: show samples somehow (maybe by dots along gt arr)
         else:
             raise Exception("Unrecognized output representation")
 
@@ -251,7 +272,7 @@ def main():
         assert(y.shape == (args.resolution, args.resolution))
         plt_axis.imshow(display_fn(y), interpolation="bicubic")
         if (args.predictvariance):
-            sigma = img[1]
+            sigma = 1.0 / img[1]
             assert(sigma.shape == (args.resolution, args.resolution))
             sigma_clamped = torch.clamp(sigma, 0.0, 1.0)
             gamma_value = 0.5
@@ -268,7 +289,7 @@ def main():
         assert(y.shape == (args.resolution,))
         plt_axis.plot(y, c="black")
         if (args.predictvariance):
-            sigma = data[1]
+            sigma = 1.0 / data[1]
             assert(sigma.shape == (args.resolution,))
             plt_axis.plot(y - sigma, c="red")
             plt_axis.plot(y + sigma, c="red")
@@ -390,7 +411,7 @@ def main():
                     
                     # plot the ground truth obstacles
                     ax_t2.title.set_text("Ground Truth (train)")
-                    plot_ground_truth(ax_t2, batch_cpu)
+                    plot_ground_truth(ax_t2, batch_cpu, show_samples=True)
                     ax_b2.title.set_text("Ground Truth (validation)")
                     plot_ground_truth(ax_b2, val_batch_cpu)
                     

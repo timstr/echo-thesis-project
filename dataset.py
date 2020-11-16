@@ -22,7 +22,7 @@ outputformat_all = [outputformat_sdf, outputformat_hm, outputformat_dm]
 
 class WaveSimDataset(torch.utils.data.Dataset):
     def __init__(self, data_folder, samples_per_example, num_examples, max_obstacles, receiver_indices, circles_only, input_representation,
-        output_representation, implicit_function, dense_output_resolution):
+        output_representation, implicit_function, use_importance_sampling, dense_output_resolution):
         # TODO: document this further
         """
             output_representation : the representation of expected outputs, must be one of:
@@ -51,6 +51,7 @@ class WaveSimDataset(torch.utils.data.Dataset):
         self._input_representation = input_representation
         self._output_representation = output_representation
         self._implicit_function = implicit_function
+        self._importancesampling = use_importance_sampling
         self._dense_output_resolution = dense_output_resolution
 
         print("Loading data into memory from \"{}\"...".format(data_folder))
@@ -98,8 +99,31 @@ class WaveSimDataset(torch.utils.data.Dataset):
 
         if self._implicit_function:
             # input parameters, scalar output
+
+            def get_filter(x):
+                # HACK
+                assert self._output_representation == "sdf"
+                return 0.1 + 0.9 * (1.0 - torch.round(torch.clamp(torch.abs(10.0 * x), max=1.0)))
+            def maybe_accept(x):
+                y = get_filter(x)
+                assert torch.all(y >= 0.0) and torch.all(y <= 1.0)
+                r = torch.rand_like(y)
+                mask = y >= r
+                return mask
+
+
+            # TODO: importance sampling
+            # One option: sample uniformly, get outputs, create a probability distribution from outputs,
+            # reject those that are less than a uniform random variable, and repeat with the subset.
+            # This could be done using an evolving boolean mask
             params = make_implicit_params_train(self._spe, self._output_representation)
             output = make_implicit_outputs(obs, params, self._output_representation)
+            mask = torch.ones_like(output).bool()
+            while torch.any(mask):
+                params[mask] = make_implicit_params_train(self._spe, self._output_representation)[mask]
+                output[mask] = make_implicit_outputs(obs, params, self._output_representation)[mask]
+                m = maybe_accept(output)
+                mask[m] = False
 
             theDict["params"] = params
             theDict["output"] = output
