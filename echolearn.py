@@ -7,6 +7,7 @@ import torch.nn as nn
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from argparse import ArgumentParser
+import matplotlib
 import matplotlib.pyplot as plt
 import math
 import numpy as np
@@ -51,6 +52,7 @@ def main():
     parser.add_argument("--circlesonly", dest="circlesonly", default=False, action="store_true")
     parser.add_argument("--allowocclusions", dest="allowocclusions", default=True, action="store_true")
     parser.add_argument("--nosave", dest="nosave", default=False, action="store_true")
+    parser.add_argument("--nodisplay", dest="nodisplay", default=False, action="store_true")
     parser.add_argument("--iterations", type=int, dest="iterations", default=None)
     parser.add_argument("--implicitfunction", dest="implicitfunction", default=False, action="store_true")
     parser.add_argument("--samplesperexample", type=int, dest="samplesperexample", default=128)
@@ -64,6 +66,9 @@ def main():
     parser.add_argument("--validationinterval", type=int, dest="validationinterval", default=256)
 
     args = parser.parse_args()
+
+    if args.nodisplay:
+        matplotlib.use("Agg")
 
     emitter_config = EmitterConfig(
         arrangement=args.emitterarrangement,
@@ -342,7 +347,8 @@ def main():
     
     with SummaryWriter(log_path) as writer:
 
-        plt.ion()
+        if not args.nodisplay:
+            plt.ion()
 
         fig, axes = plt.subplots(2, 4, figsize=(22, 10), dpi=80)
         fig.tight_layout(rect=(0.0, 0.05, 1.0, 0.95))
@@ -399,7 +405,13 @@ def main():
                     
                     writer.add_scalar("validation loss", curr_val_loss, global_iteration)
 
-                if ((global_iteration + 1) % args.plotinterval) == 0:
+                time_to_plot = ((global_iteration + 1) % args.plotinterval) == 0
+                time_to_save_figure = ((global_iteration + 1) % (args.plotinterval * 8)) == 0
+
+                if time_to_plot:
+                    print("Epoch {}, iteration {} of {} ({} %), loss={}".format(e, i, len(train_loader), 100*i//len(train_loader), losses[-1]))
+
+                if time_to_plot and (not args.nodisplay or time_to_save_figure):
                     val_batch_cpu = next(iter(val_loader))
                     val_batch_gpu = val_batch_cpu.to('cuda')
 
@@ -447,13 +459,8 @@ def main():
                     # Note: calling show or pause will cause a bad time
                     fig.canvas.draw()
                     fig.canvas.flush_events()
-                    
-                    # clear output window and display updated figure
-                    # display.clear_output(wait=True)
-                    # display.display(plt.gcf())
-                    print("Epoch {}, iteration {} of {} ({} %), loss={}".format(e, i, len(train_loader), 100*i//len(train_loader), losses[-1]))
 
-                    if ((global_iteration + 1) % (args.plotinterval * 8)) == 0:
+                    if time_to_save_figure:
                         plt_screenshot().save(log_path + "/image_" + str(global_iteration + 1) + ".png")
 
                         # NOTE: this is done in the screenshot branch so that a screenshot with the final
