@@ -1,7 +1,8 @@
 __pycache__/
 dataset/
 sim_params/
-logs/
+log*/
+models/
 *.mp4
 *.wav
 *.dat

@@ -3,6 +3,9 @@ import math
 import scipy.interpolate
 import numpy as np
 import random
+import itertools
+
+from torch import linspace
 
 from device_dict import DeviceDict
 
@@ -31,23 +34,60 @@ receiver_locations = [
     (position_positive, position_positive)
 ]
 
-# signed, clipped logarithm
-def sclog(t):
-    max_val = 1e0
-    min_val = 1e-4
-    signs = torch.sign(t)
-    t = torch.abs(t)
-    t = torch.clamp(t, min=min_val, max=max_val)
-    t = torch.log(t)
-    t = (t - math.log(min_val)) / (math.log(max_val) - math.log(min_val))
-    t = t * signs
-    return t
 
-def normalize_amplitude(waveform):
-    max_amp = torch.max(torch.abs(waveform))
-    if max_amp > 1e-3:
-        waveform = (0.5 / max_amp) * waveform
-    return waveform
+def all_yx_locations(size):
+    ls = torch.linspace(0, 1, size).cuda()
+    return torch.stack(
+        torch.meshgrid(ls, ls),
+        dim=2
+    ).reshape(size**2, 2).permute(1, 0)
+
+
+def cutout_circle(barrier, y, x, rad):
+    h, w = barrier.shape
+    grid = torch.stack(
+        torch.meshgrid(
+            torch.linspace(0, 1, h),
+            torch.linspace(0, 1, w)
+        ),
+        dim=-1
+    )
+    loc = torch.Tensor([[[y, x]]])
+    diffs = grid - loc
+    distsqr = torch.sum(diffs**2, dim=-1)
+    mask = (distsqr < rad**2)
+    barrier[mask] = 0.0
+
+def cutout_rectangle(barrier, y, x, height, width):
+    assert(len(barrier.shape) == 2)
+    h, w = barrier.shape
+    y0 = int(h * (y - height/2))
+    y1 = int(h * (y + height/2))
+    x0 = int(w * (x - width/2))
+    x1 = int(w * (x + width/2))
+    barrier[y0:y1, x0:x1] = 0.0
+
+def cutout_square(barrier, y, x, size, angle):
+    h, w = barrier.shape
+    grid = torch.stack(
+        torch.meshgrid(
+            torch.linspace(0, 1, h),
+            torch.linspace(0, 1, w)
+        ),
+        dim=-1
+    )
+    loc = torch.Tensor([[[y, x]]])
+    disps = grid - loc
+    c = math.cos(angle)
+    s = math.sin(angle)
+    rotmat = torch.tensor([
+        [ c, s]
+        [-s, c]
+    ])
+    disps_rot = torch.matmul(disps, rotmat)
+    halfsize = size / 2
+    mask = (disps_rot[:,:,0] >= halfsize) * (disps_rot[:,:,1] >= halfsize)
+    barrier[mask] = 0.0
 
 def sdf_batch_circle(coordinates_yx_batch, circle_y, circle_x, circle_r):
     assert(len(coordinates_yx_batch.shape) == 2)
@@ -56,13 +96,22 @@ def sdf_batch_circle(coordinates_yx_batch, circle_y, circle_x, circle_r):
     circle_yx = torch.tensor([circle_y, circle_x]).unsqueeze(-1).to(dev)
     return torch.sqrt(torch.sum((coordinates_yx_batch - circle_yx)**2, dim=0)) - circle_r
 
-def sdf_batch_rectangle(coordinates_yx_batch, rect_y, rect_x, rect_h, rect_w):
+def sdf_batch_rectangle(coordinates_yx_batch, rect_y, rect_x, rect_h, rect_w, rect_angle):
     assert(len(coordinates_yx_batch.shape) == 2)
     assert(coordinates_yx_batch.shape[0] == 2)
     dev = coordinates_yx_batch.device
     rect_yx = torch.tensor([rect_y, rect_x]).unsqueeze(-1).to(dev)
+
+    disps = coordinates_yx_batch - rect_yx
+    c = math.cos(-rect_angle)
+    s = math.sin(-rect_angle)
+    rot_y = c * disps[0,:] - s * disps[1,:]
+    rot_x = s * disps[0,:] + c * disps[1,:]
+    disps_rot = torch.stack((rot_y, rot_x), dim=0)
+    abs_disps_rot = torch.abs(disps_rot)
+
     rect_hw_halved = torch.tensor([rect_h * 0.5, rect_w * 0.5]).unsqueeze(-1).to(dev)
-    edgeDisp = torch.abs(coordinates_yx_batch - rect_yx) - rect_hw_halved
+    edgeDisp = torch.abs(abs_disps_rot) - rect_hw_halved
     outerDist = torch.sqrt(torch.sum(torch.clamp(edgeDisp, min=0.0)**2, dim=0))
     innerDist = torch.clamp(torch.max(edgeDisp, dim=0)[0], max=0.0)
     return outerDist + innerDist
@@ -74,8 +123,8 @@ def sdf_batch_one_shape(coordinates_yx_batch, shape_tuple):
         r, = params
         return sdf_batch_circle(coordinates_yx_batch, y, x, r)
     elif ty == RECTANGLE:
-        h, w = params
-        return sdf_batch_rectangle(coordinates_yx_batch, y, x, h, w)
+        h, w, a = params
+        return sdf_batch_rectangle(coordinates_yx_batch, y, x, h, w, a)
     else:
         raise Exception("Unknown shape type")
 
@@ -102,15 +151,23 @@ def heatmap_batch_circle(coordinates_yx_batch, circle_y, circle_x, circle_r):
     ret[dists <= circle_r**2] = 1.0
     return ret
 
-def heatmap_batch_rectangle(coordinates_yx_batch, rect_y, rect_x, rect_h, rect_w):
+def heatmap_batch_rectangle(coordinates_yx_batch, rect_y, rect_x, rect_h, rect_w, rect_angle):
     assert(len(coordinates_yx_batch.shape) == 2)
     assert(coordinates_yx_batch.shape[0] == 2)
     dev = coordinates_yx_batch.device
     rect_yx = torch.tensor([rect_y, rect_x]).unsqueeze(-1).to(dev)
-    abs_disps = torch.abs(coordinates_yx_batch - rect_yx)
+    disps = coordinates_yx_batch - rect_yx
+
+    c = math.cos(-rect_angle)
+    s = math.sin(-rect_angle)
+    rot_y = c * disps[0,:] - s * disps[1,:]
+    rot_x = s * disps[0,:] + c * disps[1,:]
+    disps_rot = torch.stack((rot_y, rot_x), dim=0)
+    abs_disps_rot = torch.abs(disps_rot)
+
     ret = torch.zeros(coordinates_yx_batch.shape[1])
-    inside_y = abs_disps[0] < (rect_h * 0.5)
-    inside_x = abs_disps[1] < (rect_w * 0.5)
+    inside_y = abs_disps_rot[0] < (rect_h * 0.5)
+    inside_x = abs_disps_rot[1] < (rect_w * 0.5)
     ret[inside_y * inside_x] = 1.0
     return ret
 
@@ -121,8 +178,8 @@ def heatmap_batch_one_shape(coordinates_yx_batch, shape_tuple):
         r, = params
         return heatmap_batch_circle(coordinates_yx_batch, y, x, r)
     elif ty == RECTANGLE:
-        h, w = params
-        return heatmap_batch_rectangle(coordinates_yx_batch, y, x, h, w)
+        h, w, a = params
+        return heatmap_batch_rectangle(coordinates_yx_batch, y, x, h, w, a)
     else:
         raise Exception("Unknown shape type")
 
@@ -146,37 +203,28 @@ def intersect_line_segment(ry, rx, dy, dx, p1y, p1x, p2y, p2x):
         p1y, p1x : point (y,x) for first end of line segment
         p2y, p2x : point (y,x) for second end of line segment
     """
-    e = 1e-6
+    eps = 1e-6
 
-    # v1 : vector from first line end to ray origin
     v1y = ry - p1y
     v1x = rx - p1x
-    # v2 : vector along line segment
-    v2y = p2y - p1y
     v2x = p2x - p1x
-
-    # v3: vector orthogonal to ray direction
-    v3y = dx
+    v2y = p2y - p1y
     v3x = -dy
+    v3y = dx
 
-    v1dotv3 = v1y * v3y + v1x * v3x
-    v2dotv3 = v2y * v3y + v2x * v3x
-    if abs(v2dotv3) < e:
+    v2_dot_v3 = (v2x * v3x) + (v2y * v3y)
+    if abs(v2_dot_v3) < eps:
         return None
+    
 
-    # position of collision point along line segment from p1 to p2
-    t2 = v1dotv3 / v2dotv3
-
+    v1_dot_v3 = (v1x * v3x) + (v1y * v3y)
+    t2 = v1_dot_v3 / v2_dot_v3
     if t2 < 0.0 or t2 > 1.0:
         return None
 
-    v2crossv1 = math.hypot(v2y * v1x, v2x * v1y)
-
-    # position of collision point along ray
-    t1 = v2crossv1 / v2dotv3
-
-    return t1 if t1 > e else None
-
+    v2_cross_v1 = v2x * v1y - v2y * v1x
+    t1 = v2_cross_v1 / v2_dot_v3
+    return t1
 
 def intersect_circle(ry, rx, dy, dx, sy, sx, sr):
     """
@@ -210,22 +258,35 @@ def intersect_circle(ry, rx, dy, dx, sy, sx, sr):
             return t1
         return None
 
-def intersect_rectangle(ry, rx, dy, dx, sy, sx, sh, sw):
+def intersect_rectangle(ry, rx, dy, dx, sy, sx, sh, sw, sa):
     """
         ry, rx : ray (y,x) origin
         dy, dx : ray (y,x) direction (expected to be a unit vector)
-        sy, sx : shape y,x e.g. center of rectangle
+        sy, sx : shape (y,x) e.g. center of rectangle
         sh, sw : shape height and width
+        sa     : shape angle
     """
-    top = sy - (0.5 * sh)
-    bottom = sy + (0.5 * sh)
-    left = sx - (0.5 * sw)
-    right = sx + (0.5 * sw)
+    s = math.sin(sa)
+    c = math.cos(sa)
+    hsh = 0.5 * sh
+    hsw = 0.5 * sw
+
+    khy = c * hsh
+    khx = s * hsh
+
+    kwy = s * hsw
+    kwx = c * hsw
+
+    tl = (sy - khy + kwy, sx - kwx - khx)
+    tr = (sy - khy - kwy, sx + kwx - khx)
+    br = (sy + khy - kwy, sx + kwx + khx)
+    bl = (sy + khy + kwy, sx - kwx + khx)
+    
     t_vals = [
-        intersect_line_segment(ry, rx, dy, dx, top,    left,  top,    right),
-        intersect_line_segment(ry, rx, dy, dx, bottom, left,  bottom, right),
-        intersect_line_segment(ry, rx, dy, dx, top,    left,  bottom, left),
-        intersect_line_segment(ry, rx, dy, dx, top,    right, bottom, right)
+        intersect_line_segment(ry, rx, dy, dx, tl[0], tl[1], tr[0], tr[1]),
+        intersect_line_segment(ry, rx, dy, dx, tr[0], tr[1], br[0], br[1]),
+        intersect_line_segment(ry, rx, dy, dx, br[0], br[1], bl[0], bl[1]),
+        intersect_line_segment(ry, rx, dy, dx, bl[0], bl[1], tl[0], tl[1]),
     ]
 
     isSomething = lambda x : x is not None
@@ -253,7 +314,7 @@ def distance_along_line_of_sight(obs, ry, rx, dy, dx, no_collision_val=None):
             assert(len(rest) == 3)
             return intersect_circle(*ray, *rest)
         elif ty == RECTANGLE:
-            assert(len(rest) == 4)
+            assert(len(rest) == 5)
             return intersect_rectangle(*ray, *rest)
         else:
             raise Exception("Unrecognized shape")
@@ -275,10 +336,7 @@ def make_image_pred(example, img_size, network, num_splits, predict_variance):
     outputs = torch.zeros(num_dims, img_size**2)
     assert(img_size**2 % num_splits) == 0
     split_size = img_size**2 // num_splits
-    xy_locations = torch.stack(torch.meshgrid(
-        torch.linspace(0, 1, img_size),
-        torch.linspace(0, 1, img_size)
-    ), dim=2).cuda().reshape(1, img_size**2, 2)
+    xy_locations = all_yx_locations(img_size).permute(1, 0).unsqueeze(0)
     d = DeviceDict({
         "input": example["input"][:1],
         
@@ -299,11 +357,7 @@ def make_sdf_image_pred(example, img_size, network, num_splits, predict_variance
 def make_sdf_image_gt(example, img_size):
     obs = example["obstacles_list"][0]
 
-    ls = torch.linspace(0, 1, img_size)
-    coordinates_yx = torch.stack(
-        torch.meshgrid(ls, ls),
-        dim=2
-    ).reshape(img_size**2, 2).permute(1, 0).cuda()
+    coordinates_yx = all_yx_locations(img_size)
 
     return sdf_batch(coordinates_yx, obs).reshape(img_size, img_size)
 
@@ -342,11 +396,7 @@ def make_heatmap_image_pred(example, img_size, network, num_splits, predict_vari
 def make_heatmap_image_gt(example, img_size):
     obs = example["obstacles_list"][0]
 
-    ls = torch.linspace(0, 1, img_size)
-    coordinates_yx = torch.stack(
-        torch.meshgrid(ls, ls),
-        dim=2
-    ).reshape(img_size**2, 2).permute(1, 0).cuda()
+    coordinates_yx = all_yx_locations(img_size)
 
     # return heatmap_batch(coordinates_yx, obs).reshape(img_size, img_size)
     return torch.clamp(img_size * -sdf_batch(coordinates_yx, obs), 0.0, 1.0).reshape(img_size, img_size)
@@ -399,75 +449,93 @@ def center_and_undelay_signal(echo_signal, y, x):
     assert(out.shape == (4, 4096))
     return out
 
-def make_receiver_indices(receivers, arrangement):
-    assert(isinstance(receivers, int))
-    assert(arrangement == "flat" or arrangement == "grid")
 
-    # NOTE: see "receiver locations.txt" to understand what's happening here
-
-    assert(receivers >= 4 or arrangement == "flat")
-    assert(receivers <= 16 or arrangement == "grid")
-
-    if arrangement == "grid" and receivers >= 4:
-        if receivers >= 16:
-            numrows = 4
-        else:
-            numrows = 2
+def obstacle_radius(o):
+    t = o[0]
+    shape = o[3:]
+    if t == CIRCLE:
+        r, = shape
+        return r
+    elif t == RECTANGLE:
+        h, w = shape[:2]
+        return math.hypot(h, w)
     else:
-        numrows = 1
+        raise Exception("Unrecognized obstacle type")
 
-    numcols = receivers // numrows
+def obstacles_too_close(obstacles, min_dist):
+    n = len(obstacles)
+    bcs = []
+    for o in obstacles:
+        bcs.append((o[1], o[2], obstacle_radius(o)))
 
-    receiver_indices = []
-    for i in range(numcols):
-        if numcols == 1:
-            idx_base = 32
-        elif numcols == 2:
-            idx_base = 16 + 32 * i
-        else:
-            idx_base = ((i * 64) // numcols) + ((16 // (numcols * 2)) & 0xFFF8)
-        for j in range(numrows):
-            receiver_indices.append(idx_base + (j * 3 if numrows == 2 else j))
-    
-    assert(len(receiver_indices) == receivers)
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            yi, xi, ri = bcs[i]
+            yj, xj, rj = bcs[j]
+            d = math.hypot(yi - yj, xi - xj)
+            if d - ri - rj < min_dist:
+                return True
+    return False
 
-    return receiver_indices
 
-def overlapping(obstacle1, obstacle2):
-    t1 = obstacle1[0]
-    t2 = obstacle2[0]
-    assert(t1 == CIRCLE or t1 == RECTANGLE)
-    assert(t2 == CIRCLE or t2 == RECTANGLE)
-    args1 = obstacle1[1:]
-    args2 = obstacle2[1:]
-    if t1 == CIRCLE and t2 == CIRCLE:
-        y1, x1, r1 = args1
-        y2, x2, r2 = args2
-        d = math.hypot(y1 - y2, x1 - x2)
-        return d < r1 + r2
-    elif t1 == RECTANGLE and t2 == RECTANGLE:
-        y1, x1, h1, w1 = args1
-        y2, x2, h2, w2 = args2
-        return abs(y1 - y2) < (h1 + h2) / 2 and abs(x1 - x2) < (w1 + w2) / 2
-    else:
-        ry, rx, rw, rh = args1 if t1 == RECTANGLE else args2
-        cy, cx, cr = args1 if t1 == CIRCLE else args2
-        return abs(ry - cy) < rh / 2 + cr and abs(rx - cx) < rw / 2 + cr
+def obstacles_occluded(obstacles):
+    n = len(obstacles)
+    bbs = []
+    for o in obstacles:
+        x = o[2]
+        rad = obstacle_radius(o)
+        bbs.append((x - rad, x + rad))
+    bbs = sorted(bbs, key=lambda x: x[0])
+    for bb1, bb2 in zip(bbs, bbs[1:]):
+        if bb1[1] > bb2[0]:
+            return True
+    return False
 
-def make_random_obstacles(max_num_obstacles=10):
+
+def every_possible_obstacle(min_size, max_size, top, bottom, left, right, num_size_increments, num_space_increments, num_angle_increments):
+    for size in np.linspace(min_size, max_size, num_size_increments):
+        halfsize = size / 2
+        for y in np.linspace(top + halfsize, bottom - halfsize, num_space_increments):
+            for x in np.linspace(left + halfsize, right - halfsize, num_space_increments):
+                yield CIRCLE, y, x, halfsize
+
+                edge_len = (1.0 / math.sqrt(2.0)) * size
+                for angle in np.linspace(0.0, 0.5 * np.pi, num_angle_increments, endpoint=False):
+                    yield RECTANGLE, y, x, edge_len, edge_len, angle
+
+def all_possible_obstacles(max_num_obstacles, min_dist, min_size, max_size, top, bottom, left, right, num_size_increments, num_space_increments, num_angle_increments):
+    for n in range(1, max_num_obstacles + 1):
+        prod = itertools.product(*(every_possible_obstacle(
+            min_size, max_size,
+            top, bottom,
+            left, right,
+            num_size_increments,
+            num_space_increments,
+            num_angle_increments
+        ) for _ in range(n)))
+        for obs in prod:
+            if not obstacles_too_close(obs, min_dist):
+                yield obs
+
+def make_random_obstacles(max_num_obstacles=10, min_dist=0.05):
     n = random.randint(1, max_num_obstacles)
 
     obs = []
-
+    
     def collision(shape):
         nonlocal obs
+        y1, x1 = shape[1:3]
+        r1 = obstacle_radius(shape)
         for s in obs:
-            if (overlapping(s, shape)):
+            y2, x2 = s[1:3]
+            r2 = obstacle_radius(s)
+            d = math.hypot(y1 - y2, x1 - x2)
+            if d - r1 - r2 < min_dist:
                 return True
         return False
-
-    obs = []
-
+    
     for _ in range(n):
         for _ in range(100):
             y = random.uniform(0, 0.75)
@@ -477,7 +545,8 @@ def make_random_obstacles(max_num_obstacles=10):
                 # rectangle
                 h = random.uniform(0.01, 0.2)
                 w = random.uniform(0.01, 0.2)
-                o = (RECTANGLE, y, x, h, w)
+                r = random.uniform(0.0, np.pi / 2.0)
+                o = (RECTANGLE, y, x, h, w, r)
                 if collision(o):
                     continue
                 obs.append(o)
@@ -520,7 +589,7 @@ def make_implicit_outputs(obs, params, representation):
         # CPU implementation for now :(
         for i in range(num):
             p = params[i]
-            v = torline_of_sight_from_bottom_up(obs, p[0])
+            v = line_of_sight_from_bottom_up(obs, p[0])
             output[i] = torch.tensor(v)
         return output
     else:
@@ -538,6 +607,8 @@ def make_dense_outputs(obs, representation, img_size):
         output = make_depthmap_gt(theDict, img_size)
         assert(len(output.shape) == 1)
         assert(output.shape[0] == img_size)
+    else:
+        raise Exception("Unown representation")
     return output
 
 def make_deterministic_validation_batches_implicit(example, representation, img_size, num_splits):
@@ -545,15 +616,16 @@ def make_deterministic_validation_batches_implicit(example, representation, img_
     params = make_implicit_params_validation(img_size, representation)
     obsobs = example["obstacles_list"]
 
-    assert(img_size**2 % num_splits == 0)
-    split_size = img_size**2 // num_splits
+    data_size = img_size if (representation == "depthmap") else img_size**2
+    assert(data_size % num_splits == 0)
+    split_size = data_size // num_splits
 
     batches = []
     for i in range(num_splits):
+        begin = i * split_size
+        end = (i + 1) * split_size
         output = torch.zeros(len(obsobs), split_size)
         for j, obs in enumerate(obsobs):
-            begin = i * split_size
-            end = (i + 1) * split_size
             output[j] = make_implicit_outputs(obs, params[0, begin:end], representation)
         d = DeviceDict(example.copy())
         d["params"] = params[:, begin:end].repeat(len(obsobs), 1, 1)

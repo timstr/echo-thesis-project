@@ -1,11 +1,15 @@
 import sys
+from scipy.signal.ltisys import step
 import torch
 import matplotlib.animation
 import matplotlib.pyplot as plt
 import math
+import numpy as np
 
-from field import Field, make_random_field
+from wave_field import Field, make_random_field
 from progress_bar import progress_bar
+
+size = 512
 
 def render_animation(field, duration, fps=30, output_path="animation.mp4", on_render_frame=None, render_interval=4):
     plt.axis('off')
@@ -13,29 +17,9 @@ def render_animation(field, duration, fps=30, output_path="animation.mp4", on_re
         figsize=(8,8),
         dpi=64
     )
-    
-    def make_field_image():
-        amp = 20.0 * field.get_field()[0,0,:,:]
-        vel =  5.0 * field.get_field()[0,1,:,:]
-        field_rgb = torch.zeros(field.get_height(), field.get_width(), 3)
-        # Red: positive amplitude
-        field_rgb[:,:,0] = torch.clamp(amp, 0.0, 1.0)
-        # Blue: negative amplitude
-        field_rgb[:,:,2] = torch.clamp(-amp , 0.0, 1.0)
-        # Green: absolute velocity
-        field_rgb[:,:,1] = torch.clamp(torch.abs(vel), 0.0, 1.0)
-        return field_rgb.cpu()
 
     im_field = plt.imshow(
-        make_field_image()
-        # cmap="inferno",
-        # vmin = -0.05,
-        # vmax = 0.05
-    )
-    barrier_rgba = torch.ones(field.get_height(), field.get_width(), 4) * 0.5
-    barrier_rgba[:,:,3] = 1.0 - field.get_barrier()[0,0,:,:].cpu()
-    im_barrier = plt.imshow(
-        barrier_rgba
+        field.to_image().cpu()
     )
 
     num_frames = int(duration * fps)
@@ -49,7 +33,7 @@ def render_animation(field, duration, fps=30, output_path="animation.mp4", on_re
                 on_render_frame()
             field.step()
             step_count += 1
-        im_field.set_data(make_field_image())
+        im_field.set_data(field.to_image().cpu())
         plt.gca().set_title("Step {}".format(step_count))
         progress_bar(i, num_frames)
 
@@ -86,31 +70,30 @@ def render_animation(field, duration, fps=30, output_path="animation.mp4", on_re
 #     field.get_field()[0,1,:,:] = 0.75 * amp * torch.cos(freq * y).unsqueeze(-1) * gaussian_mask
 
 def main():
-    size = 512
 
-    field = make_random_field(size, size) # Field with obstacles
+    field = make_random_field(size, 2) # Field with obstacles
     # field = Field(size, size) # empty field
-
-    cycle_length = 200
-    num_cycles = 8
-    signal_len = num_cycles * cycle_length
-    signal = 2.0 * torch.round(0.5 + 0.5 * torch.sin(torch.linspace(0.0, num_cycles * 2.0 * math.pi, signal_len))) - 1.0
     
-    current_frame = 0
+    emitter_locations = [
+        (size - 8, size // 2 - 200),
+        (size - 8, size // 2 - 100),
+        (size - 8, size // 2),
+        (size - 8, size // 2 + 100),
+        (size - 8, size // 2 + 200),
+    ]
+    steps_per_emitter = 256
 
-    speaker_width = 128
-    speaker_amplitude = torch.cos(torch.linspace(-0.5, 0.5, speaker_width) * math.pi)
+    current_frame = 0
 
     def on_render_frame():
         nonlocal current_frame
-        if (current_frame < signal_len):
-            signal_val = signal[current_frame]
-            field.get_field()[
-                0,
-                0,
-                size-8:size-4,
-                (size//2 - speaker_width//2) : (size//2 + speaker_width//2)
-            ] = signal_val * speaker_amplitude.unsqueeze(0)
+        if current_frame % steps_per_emitter == 0:
+            e = current_frame // steps_per_emitter
+            if e < len(emitter_locations):
+                field.get_field()[
+                    emitter_locations[e][0],
+                    emitter_locations[e][1]
+                ] = -30.0
         current_frame += 1
 
     # make_wavelet(field)
@@ -126,7 +109,7 @@ def main():
     # plt.imshow(field.get_field()[0,0,:,:].cpu())
     # plt.show()
 
-    num_steps = 16384
+    num_steps = 4096
     render_interval = 8
     fps = 30
     duration = num_steps / fps / render_interval

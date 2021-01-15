@@ -5,9 +5,10 @@ import math
 from device_dict import DeviceDict
 
 class SimpleNN(nn.Module):
-    def __init__(self, num_input_channels, num_implicit_params, input_format="1D", output_format="scalar", output_resolution=None, predict_variance=False):
+    def __init__(self, input_config, output_config):
         super().__init__()
-
+        raise Exception("This code is currently undergoing maintenance and is not available. Please try again later.")
+        # TODO
         self._num_implicit_params = num_implicit_params if num_implicit_params is not None else 0
         self._output_format = output_format
         self._output_resolution = output_resolution if output_resolution is not None else 1

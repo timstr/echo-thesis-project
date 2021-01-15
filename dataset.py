@@ -1,28 +1,15 @@
+from dataset_config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig, combine_emitted_signals, example_should_be_used, transform_received_signals
 import pickle
 import torch
 import glob
+import os
 
-from featurize import sclog, make_sdf_image_gt, make_depthmap_gt, make_heatmap_image_gt, make_implicit_params_train, make_implicit_outputs, make_dense_outputs, CIRCLE, RECTANGLE
+from featurize import make_implicit_params_train, make_implicit_outputs, make_dense_outputs, CIRCLE
 from device_dict import DeviceDict
-from featurize import sclog
 from progress_bar import progress_bar
-from featurize_audio import make_spectrogram
-
-# dataset formats
-inputformat_ar = "audioraw"
-inputformat_aw = "audiowaveshaped"
-inputformat_sg = "spectrogram"
-inputformat_all = [inputformat_ar, inputformat_aw, inputformat_sg]
-
-# dataset formats
-outputformat_sdf = "sdf"
-outputformat_hm = "heatmap"
-outputformat_dm = "depthmap"
-outputformat_all = [outputformat_sdf, outputformat_hm, outputformat_dm]
 
 class WaveSimDataset(torch.utils.data.Dataset):
-    def __init__(self, data_folder, samples_per_example, num_examples, max_obstacles, receiver_indices, circles_only, input_representation,
-        output_representation, implicit_function, use_importance_sampling, dense_output_resolution):
+    def __init__(self, training_config, input_config, output_config, emitter_config, receiver_config):
         # TODO: document this further
         """
             output_representation : the representation of expected outputs, must be one of:
@@ -32,98 +19,91 @@ class WaveSimDataset(torch.utils.data.Dataset):
         """
         super(WaveSimDataset).__init__()
 
-        def allCircles(obs):
-            for o in obs:
-                if o[0] != CIRCLE:
-                    return False
-            return True
+        assert isinstance(training_config, TrainingConfig)
+        assert isinstance(input_config, InputConfig)
+        assert isinstance(output_config, OutputConfig)
+        assert isinstance(emitter_config, EmitterConfig)
+        assert isinstance(receiver_config, ReceiverConfig)
+        self._training_config = training_config
+        self._input_config = input_config
+        self._output_config = output_config
+        self._emitter_config = emitter_config
+        self._receiver_config = receiver_config
 
-        self._spe = samples_per_example
         self._data = []
         self._dense_output_cache = {}
+        self._rootpath = os.environ.get("WAVESIM_DATASET")
 
-        assert(len(receiver_indices) <= 64)
-        assert(set(receiver_indices).issubset(range(64)))
-        self._receiver_indices = receiver_indices
+        if self._rootpath is None or not os.path.exists(self._rootpath):
+            raise Exception("Please set the WAVESIM_DATASET environment variable to point to the WaveSim dataset root")
 
-        assert(input_representation in inputformat_all)
-        assert(output_representation in outputformat_all)
-        self._input_representation = input_representation
-        self._output_representation = output_representation
-        self._implicit_function = implicit_function
-        self._importancesampling = use_importance_sampling
-        self._dense_output_resolution = dense_output_resolution
-
-        print("Loading data into memory from \"{}\"...".format(data_folder))
         
-        filenames = sorted(glob.glob("{}/example *.pkl".format(data_folder)))
+
+        print("Loading data into memory from \"{}\"...".format(self._rootpath))
+        
+        filenames = sorted(glob.glob("{}/example *.pkl".format(self._rootpath)))
         num_files = len(filenames)
-        if num_examples is not None:
-            num_files = min(num_files, num_examples)
+        if num_files == 0:
+            raise Exception("The WAVESIM_DATASET environment variable points to a folder which contains no example files. Windows users: did you accidentally include quotes in the environment variable?")
+        if self._training_config.max_examples is not None:
+            num_files = min(num_files, self._training_config.max_examples)
         for i, path in enumerate(filenames):
             with open(path, "rb") as file:
-                obs, echo = pickle.load(file)
-                echo = torch.tensor(echo).permute(1, 0).float()
-                echo = echo[receiver_indices, :]
-            if max_obstacles is not None and len(obs) > max_obstacles:
-                continue
-            if circles_only and not allCircles(obs):
+                data = pickle.load(file)
+            impulse_responses = torch.tensor(data["impulse_responses"]).float()
+            obstacles = data["obstacles"]
+            occlusion = data["occlusion"]
+            if not example_should_be_used(obstacles, occlusion, self._training_config):
                 continue
             progress_bar(len(self._data), num_files)
-            self._data.append((obs, echo))
-            if num_examples is not None and len(self._data) == num_examples:
+            self._data.append((obstacles, impulse_responses))
+            if self._training_config.max_examples is not None and len(self._data) >= self._training_config.max_examples:
                 break
         print(" Done.")
-        if num_examples is not None and len(self._data) != num_examples:
+        if self._training_config.max_examples is not None and len(self._data) != self._training_config.max_examples:
             print("Warning! Fewer matching examples were found than were requested")
-            print("    Expected: ", num_examples)
+            print("    Expected: ", self._training_config.max_examples)
             print("    Actual:   ", len(self._data))
     
     def __len__(self):
         return len(self._data)
     
     def __getitem__(self, idx):
-        obs, echo_raw = self._data[idx]
+        obstacles, impulse_responses = self._data[idx]
         
-        if self._input_representation == inputformat_ar:
-            the_input = echo_raw
-        elif self._input_representation == inputformat_aw:
-            the_input = sclog(echo_raw)
-        elif self._input_representation == inputformat_sg:
-            the_input = make_spectrogram(echo_raw)
+        received_signals = combine_emitted_signals(impulse_responses, self._emitter_config, self._receiver_config)
+        the_input = transform_received_signals(received_signals, self._input_config)
         
         theDict = {
-            'obstacles_list': obs,
+            'obstacles_list': obstacles,
             'input': the_input
         }
 
-        if self._implicit_function:
-            # input parameters, scalar output
-
-            def get_filter(x):
-                # HACK
-                assert self._output_representation == "sdf"
-                return 0.1 + 0.9 * (1.0 - torch.round(torch.clamp(torch.abs(10.0 * x), max=1.0)))
-            def maybe_accept(x):
-                y = get_filter(x)
-                assert torch.all(y >= 0.0) and torch.all(y <= 1.0)
-                r = torch.rand_like(y)
-                mask = y >= r
-                return mask
-
-
-            # TODO: importance sampling
-            # One option: sample uniformly, get outputs, create a probability distribution from outputs,
-            # reject those that are less than a uniform random variable, and repeat with the subset.
-            # This could be done using an evolving boolean mask
-            params = make_implicit_params_train(self._spe, self._output_representation)
-            output = make_implicit_outputs(obs, params, self._output_representation)
-            mask = torch.ones_like(output).bool()
-            while torch.any(mask):
-                params[mask] = make_implicit_params_train(self._spe, self._output_representation)[mask]
-                output[mask] = make_implicit_outputs(obs, params, self._output_representation)[mask]
-                m = maybe_accept(output)
-                mask[m] = False
+        if self._output_config.implicit:
+            spe = self._training_config.samples_per_example
+            params = make_implicit_params_train(spe, self._output_config.format)
+            output = make_implicit_outputs(obstacles, params, self._output_config.format)
+            
+            if self._training_config.importance_sampling and self._output_config.format != "depthmap":
+                def get_filter(x, params):
+                    sdf = x if self._output_config == "sdf" else make_implicit_outputs(
+                        obstacles,
+                        params,
+                        "sdf"
+                    )
+                    return 0.1 + 0.9 * (1.0 - torch.round(torch.clamp(torch.abs(10.0 * sdf), max=1.0)))
+                def maybe_accept(x, params):
+                    y = get_filter(x, params)
+                    assert torch.all(y >= 0.0) and torch.all(y <= 1.0)
+                    r = torch.rand_like(y)
+                    mask = y >= r
+                    return mask
+                mask = torch.ones_like(output).bool()
+                while torch.any(mask):
+                    params[mask] = make_implicit_params_train(spe, self._output_config.format)[mask]
+                    output[mask] = make_implicit_outputs(obstacles, params, self._output_config.format)[mask]
+                    m = maybe_accept(output, params)
+                    mask[m] = False
 
             theDict["params"] = params
             theDict["output"] = output
@@ -132,7 +112,7 @@ class WaveSimDataset(torch.utils.data.Dataset):
             if idx in self._dense_output_cache:
                 output = self._dense_output_cache[idx]
             else:
-                output = make_dense_outputs(obs, self._output_representation, self._dense_output_resolution)
+                output = make_dense_outputs(obstacles, self._output_config.format, self._output_config.resolution)
                 self._dense_output_cache[idx] = output
             theDict["output"] = output
         

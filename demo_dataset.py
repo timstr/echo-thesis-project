@@ -1,100 +1,98 @@
-import pickle
+import fix_dead_command_line
+
+from dataset_config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
 import matplotlib.pyplot as plt
-import torch
 import numpy as np
-import math
 
 from dataset import WaveSimDataset
-from field import Field, make_obstacle_map
-from featurize import sclog, make_sdf_image_gt
+from featurize import make_depthmap_gt, make_heatmap_image_gt, make_sdf_image_gt, obstacles_occluded, red_white_blue_banded
 
 def main():
-    wsds = WaveSimDataset(
-        "dataset/v8",
-        permute=False,
-        samples_per_example=1
-    )
+    tcfg = TrainingConfig(max_examples=None)
+    ecfg = EmitterConfig()
+    rcfg = ReceiverConfig()
+    icfg = InputConfig(rcfg, format="spectrogram")
+    ocfg = OutputConfig(format="sdf")
 
-    # plt.ion()
+    wsds = WaveSimDataset(tcfg, icfg, ocfg, ecfg, rcfg)
 
-    for i in range(0, 100):
+    animate = False
+
+    if animate:
+        plt.ion()
+
+    for i in range(6166, 7331):
+    # for i in range(7331):
 
         example = wsds[i]
         # example = wsds[61]
 
-        # print(i)
-
-        obs = example['obstacles']
         obs_list = example['obstacles_list']
-        echo_raw = example['echo_raw']
-        echo_waveshaped = example['echo_waveshaped']
-        # depthmap = example['depthmap']
-        heatmap = example['heatmap']
+        spectrograms = example['input']
+        sdf = example["output"]
 
-        # print("List of obstacles:")
-        # for o in obs:
-        #     print("    ", obs)
+        dummy_batch = { "obstacles_list": [obs_list]}
 
-        print("Obstacles in field")
-        plt.imshow(make_obstacle_map(obs_list, 512, 512).cpu())
+        print(f"Obstacle {i}")
+
+        print("Occlusion:", obstacles_occluded(obs_list))
+
+        # print("Obstacles in field")
+        plt.cla()
+        plt.imshow(make_heatmap_image_gt(dummy_batch, 512).cpu())
         plt.show()
+
+        
+        print("Obstacles depthmap")
+        plt.cla()
+        plt.plot(make_depthmap_gt(dummy_batch, 512).cpu() * 512)
+        plt.gca().set_ylim([0.0, 512.0])
+        plt.show()
+
+        # if animate:
+        #     plt.gcf().canvas.flush_events()
+        #     plt.gcf().canvas.draw()
+        #     continue
+        # else:
+        #     plt.show()
 
         print("Obstacles signed distance field")
-        plt.imshow(make_sdf_image_gt({'obstacles_list': obs_list}, 128), vmin=0, vmax=0.5, cmap='hsv')
+        plt.cla()
+        plt.imshow(red_white_blue_banded(make_sdf_image_gt(dummy_batch, 512)).cpu())
         plt.show()
 
-        # print("Depthmap (Cartesian projection)")
-        # plt.plot(depthmap)
+        # print("Impulse responses (waveforms)")
+        # colours = [
+        #     (1.0, 0.0, 0.0),
+        #     (0.0, 1.0, 0.0),
+        #     (0.0, 0.0, 1.0),
+        #     (0.5, 0.0, 0.0),
+        #     (0.0, 0.5, 0.0),
+        #     (0.0, 0.0, 0.5),
+        #     (0.5, 0.5, 0.0),
+        #     (0.5, 0.0, 0.5),
+        #     (0.0, 0.5, 0.5),
+        # ]
+        # fig, ax = plt.subplots(n_emitters, 1)
+        # for e in range(n_emitters):
+        #     ax[e].set_ylim(-0.1, 0.25)
+        #     for r in range(n_receivers):
+        #         ax[e].plot(impulse_responses[e,r], c=colours[r])
         # plt.show()
 
-        # print("Depthmap (polar projection)")
-        # plt.polar(np.linspace(0, math.pi * 2.0, 128), depthmap)
-        # plt.show()
+        
+        print("Impulse responses (spectrograms)")
+        print("spectrogram.shape =", spectrograms.shape)
+        vmin = np.min(spectrograms)
+        vmax = np.max(spectrograms)
+        print(f"Min = {vmin}")
+        print(f"Max = {vmax}")
+        n = spectrograms.shape[0]
+        fig, ax = plt.subplots(n)
+        for i in range(n):
+                ax[i].imshow(spectrograms[i], vmin=vmin, vmax=vmax, cmap="gray")
+        plt.show()
 
-        def plot_waves(w):
-            plt.cla()
-            plt.ylim(-1.0, 1.0)
-            if (len(w.shape) > 1):
-                n = w.shape[0]
-                for i in range(n):
-                    plt.plot(w[i,:])
-            else:
-                plt.plot(w)
-            plt.show()
-
-        print("Echo (raw)")
-        plot_waves(echo_raw)
-
-        print("Echo (waveshaped)")
-        plot_waves(echo_waveshaped)
-
-
-
-        print("Echo (raw, very close to speaker)")
-        plot_waves(echo_raw[35,:])
-
-        print("Echo (waveshaped, very close to speaker)")
-        plot_waves(echo_waveshaped[35,:])
-
-
-
-        print("Echo (raw, close to speaker)")
-        plot_waves(echo_raw[32,:])
-
-        print("Echo (waveshaped, close to speaker)")
-        plot_waves(echo_waveshaped[32,:])
-
-
-
-        print("Echo (raw, far from speaker)")
-        plot_waves(echo_raw[0,:])
-
-        print("Echo (waveshaped, far from speaker)")
-        plot_waves(echo_waveshaped[0,:])
-
-        # print("Obstacle heatmap")
-        # plt.plot(heatmap)
-        # plt.show()
 
 if __name__ == "__main__":
     main()

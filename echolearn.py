@@ -1,8 +1,7 @@
-# The following fixes a zombie command line
-# Credit goes to https://stackoverflow.com/a/44822794/5023438
 import os
-os.environ["FOR_DISABLE_CONSOLE_CTRL_HANDLER"] = "1"
+import fix_dead_command_line
 
+from dataset_config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
 import torch
 import torch.nn as nn
 import torchvision
@@ -18,7 +17,7 @@ import random
 from device_dict import DeviceDict
 from dataset import WaveSimDataset
 from progress_bar import progress_bar
-from featurize import make_sdf_image_gt, make_sdf_image_pred, make_receiver_indices, make_heatmap_image_gt, make_heatmap_image_pred, make_depthmap_gt, make_depthmap_pred, make_deterministic_validation_batches_implicit, red_white_blue_banded, red_white_blue
+from featurize import make_sdf_image_gt, make_sdf_image_pred, make_heatmap_image_gt, make_heatmap_image_pred, make_depthmap_gt, make_depthmap_pred, make_deterministic_validation_batches_implicit, red_white_blue_banded, red_white_blue
 from custom_collate_fn import custom_collate
 
 from EchoLearnNN import EchoLearnNN
@@ -40,18 +39,24 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("--experiment", type=str, dest="experiment", required=True)
     parser.add_argument("--dataset", type=str, dest="dataset", default="v8")
-    parser.add_argument("--numexamples", type=int, dest="numexamples", default=None)
+    parser.add_argument("--maxexamples", type=int, dest="maxexamples", default=None)
     parser.add_argument("--batchsize", type=int, dest="batchsize", default=4)
-    parser.add_argument("--receivers", type=int, choices=[1, 2, 4, 8, 16, 32, 64], dest="receivers", default=8)
-    parser.add_argument("--arrangement", type=str, choices=["flat", "grid"], dest="arrangement", default="grid")
+    parser.add_argument("--receivercount", type=int, choices=[1, 2, 4, 8, 16, 32, 64], dest="receivercount", default=8)
+    parser.add_argument("--receiverarrangement", type=str, choices=["flat", "grid"], dest="receiverarrangement", default="grid")
+    parser.add_argument("--emitterarrangement", type=str, choices=["mono", "stereo", "surround"], dest="emitterarrangement", default="mono")
+    parser.add_argument("--emittersignal", type=str, choices=["impulse", "beep", "sweep"], dest="emittersignal", default="sweep")
+    parser.add_argument("--emittersequential", dest="emittersequential", default=False, action="store_true")
+    parser.add_argument("--emittersamefrequency", dest="emittersamefrequency", default=False, action="store_true")
     parser.add_argument("--maxobstacles", type=int, dest="maxobstacles", default=None)
     parser.add_argument("--circlesonly", dest="circlesonly", default=False, action="store_true")
+    parser.add_argument("--allowocclusions", dest="allowocclusions", default=True, action="store_true")
     parser.add_argument("--nosave", dest="nosave", default=False, action="store_true")
     parser.add_argument("--iterations", type=int, dest="iterations", default=None)
     parser.add_argument("--implicitfunction", dest="implicitfunction", default=False, action="store_true")
+    parser.add_argument("--samplesperexample", type=int, dest="samplesperexample", default=128)
     parser.add_argument("--importancesampling", dest="importancesampling", default=False, action="store_true")
     parser.add_argument("--predictvariance", dest="predictvariance", default=False, action="store_true")
-    parser.add_argument("--resolution", type=int, dest="resolution", default=32)
+    parser.add_argument("--resolution", type=int, dest="resolution", default=128)
     parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram"], required=True)
     parser.add_argument("--nnoutput", type=str, dest="nnoutput", choices=["sdf", "heatmap", "depthmap"], required=True)
     parser.add_argument("--simplenn", dest="simplenn", default=False, action="store_true")
@@ -60,49 +65,50 @@ def main():
 
     args = parser.parse_args()
 
-    receiver_indices = make_receiver_indices(args.receivers, args.arrangement)
+    emitter_config = EmitterConfig(
+        arrangement=args.emitterarrangement,
+        format=args.emittersignal,
+        sequential=args.emittersequential,
+        sameFrequency=args.emittersamefrequency
+    )
 
-    if args.nninput == "audioraw":
-        input_format = "1D"
-    elif args.nninput == "audiowaveshaped":
-        input_format = "1D"
-    elif args.nninput == "spectrogram":
-        input_format = "2D"
+    receiver_config = ReceiverConfig(
+        arrangement=args.receiverarrangement,
+        count=args.receivercount
+    )
 
-    if args.nnoutput == "sdf":
-        implicit_params = 2
-        output_format = "2D"
-    elif args.nnoutput == "depthmap":
-        implicit_params = 1
-        output_format = "1D"
-    elif args.nnoutput == "heatmap":
-        implicit_params = 2
-        output_format = "2D"
+    input_config = InputConfig(
+        format=args.nninput,
+        receiver_config=receiver_config
+    )
 
-    if args.implicitfunction:
-        output_format = "scalar"
-    else:
-        implicit_params = 0
-    
+    output_config = OutputConfig(
+        format=args.nnoutput,
+        implicit=args.implicitfunction,
+        predict_variance=args.predictvariance,
+        resolution=args.resolution
+    )
+
+    training_config = TrainingConfig(
+        max_examples=args.maxexamples,
+        max_obstacles=args.maxobstacles,
+        circles_only=args.circlesonly,
+        allow_occlusions=args.allowocclusions,
+        importance_sampling=args.importancesampling,
+        samples_per_example=args.samplesperexample
+    )
+
     what_my_gpu_can_handle = 128**2
-
-    output_dims = 2 if args.predictvariance else 1
 
     if (args.nosave):
         print("NOTE: networks are not being saved")
 
     ecds = WaveSimDataset(
-        data_folder="dataset/{}".format(args.dataset),
-        samples_per_example=128,
-        num_examples=args.numexamples,
-        max_obstacles=args.maxobstacles,
-        receiver_indices=receiver_indices,
-        circles_only=args.circlesonly,
-        input_representation=args.nninput,
-        output_representation=args.nnoutput,
-        implicit_function=args.implicitfunction,
-        use_importance_sampling=args.importancesampling,
-        dense_output_resolution=args.resolution
+        training_config,
+        input_config,
+        output_config,
+        emitter_config,
+        receiver_config
     )
 
     val_ratio = 1 / 8
@@ -199,40 +205,39 @@ def main():
                 pred = pred["output"][:, 0]
                 gt = batch["output"]
                 loss = torch.nn.functional.mse_loss(pred, gt).detach()
-            losses.append(loss.item())
+                losses.append(loss.item())
             progress_bar(i, len(val_loader))
         return np.mean(np.asarray(losses))
 
     NetworkType = SimpleNN if args.simplenn else EchoLearnNN
 
     network = NetworkType(
-        num_input_channels=args.receivers,
-        num_implicit_params=implicit_params,
-        input_format=input_format,
-        output_format=output_format,
-        output_resolution=(None if args.implicitfunction else args.resolution),
-        predict_variance=args.predictvariance
+        input_config=input_config,
+        output_config=output_config
     ).cuda()
 
+    model_path = os.environ.get("TRAINING_MODEL_PATH")
+
+    if model_path is None or not os.path.exists(model_path):
+        raise Exception("Please set the TRAINING_MODEL_PATH environment variable to point to the desired model directory")
+
     def save_network(filename):
-        filename = "models/" + filename
-        print("Saving model to \"{}\"".format(filename))
-        torch.save(network.state_dict(), filename)
+        path = os.path.join(model_path, filename)
+        print(f"Saving model to \"{path}\"")
+        torch.save(network.state_dict(), path)
 
-    def restore_network(filename):
-        filename = "models/" + filename
-        print("Loading model from \"{}\"".format(filename))
-        network.load_state_dict(torch.load(filename))
-        network.eval()
-
-    cmap_heatmap = "coolwarm"
+    # def restore_network(filename):
+    #     filename = "models/" + filename
+    #     print("Loading model from \"{}\"".format(filename))
+    #     network.load_state_dict(torch.load(filename))
+    #     network.eval()
 
     def plot_inputs(plt_axis, batch):
         the_input = batch['input'][0].detach()
         if (len(the_input.shape) == 2):
+            plt_axis.set_ylim(-1, 1)
             for j in range(args.receivers):
                 plt_axis.plot(the_input[j].detach())
-            plt_axis.set_ylim(-1, 1)
         else:
             the_input_min = torch.min(the_input)
             the_input_max = torch.max(the_input)
@@ -261,8 +266,8 @@ def main():
                 plt_axis.scatter(yx[:,1], yx[:,0], s=1.0)
         elif args.nnoutput == "depthmap":
             arr = make_depthmap_gt(batch, args.resolution).cpu()
-            plt_axis.plot(arr)
             plt_axis.set_ylim(-0.5, 1.5)
+            plt_axis.plot(arr)
             # TODO: show samples somehow (maybe by dots along gt arr)
         else:
             raise Exception("Unrecognized output representation")
@@ -287,13 +292,13 @@ def main():
     def plot_depthmap(plt_axis, data):
         y = data[0]
         assert(y.shape == (args.resolution,))
+        plt_axis.set_ylim(-0.5, 1.5)
         plt_axis.plot(y, c="black")
         if (args.predictvariance):
             sigma = 1.0 / data[1]
             assert(sigma.shape == (args.resolution,))
             plt_axis.plot(y - sigma, c="red")
             plt_axis.plot(y + sigma, c="red")
-        plt_axis.set_ylim(-0.5, 1.5)
 
     def plot_prediction(plt_axis, batch, network):
         if args.implicitfunction:
@@ -326,8 +331,15 @@ def main():
 
     timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
 
-    log_path = "logs/{}_{}".format(args.experiment, timestamp)
+    log_path_root = os.environ.get("TRAINING_LOG_PATH")
 
+    if log_path_root is None or not os.path.exists(log_path_root):
+        raise Exception("Please set the TRAINING_LOG_PATH environment variable to point to the desired log directory")
+
+    log_folder_name = f"{args.experiment}_{timestamp}"
+
+    log_path = os.path.join(log_path_root, log_folder_name)
+    
     with SummaryWriter(log_path) as writer:
 
         plt.ion()
@@ -411,7 +423,7 @@ def main():
                     
                     # plot the ground truth obstacles
                     ax_t2.title.set_text("Ground Truth (train)")
-                    plot_ground_truth(ax_t2, batch_cpu, show_samples=True)
+                    plot_ground_truth(ax_t2, batch_cpu, show_samples=False)
                     ax_b2.title.set_text("Ground Truth (validation)")
                     plot_ground_truth(ax_b2, val_batch_cpu)
                     
@@ -424,7 +436,8 @@ def main():
                     # plot the training loss on a log plot
                     ax_t4.title.set_text("Training Loss")
                     ax_t4.scatter(range(len(losses)), losses, s=1.0)
-                    ax_t4.set_yscale('log')
+                    if not args.predictvariance:
+                        ax_t4.set_yscale('log')
 
                     # plot the validation loss on a log plot
                     ax_b4.title.set_text("Validation Loss")
@@ -432,6 +445,7 @@ def main():
                     ax_b4.plot(val_loss_x, val_loss_y, c="Red")
 
                     # Note: calling show or pause will cause a bad time
+                    fig.canvas.draw()
                     fig.canvas.flush_events()
                     
                     # clear output window and display updated figure

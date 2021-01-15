@@ -29,11 +29,12 @@ half_pad_kernel_optimized = torch.tensor([
         [[ 9.7290548e-03,  4.4364929e-03], [ 9.6077397e-03, -4.0058928e-04]],
         [[-1.3560701e-02,  7.6356144e-03], [ 5.1978737e-04, -3.3461576e-05]]
     ]
-], dtype=float32).cuda()
+], dtype=torch.float32).cuda()
 
 def pad_fields(field_now, field_prev, half_pad_kernel=None):
     if half_pad_kernel is None:
         half_pad_kernel = half_pad_kernel_optimized
+        # half_pad_kernel = torch.zeros(4, 4, 2, 2).cuda()
     fields = torch.stack((field_now, field_prev), dim=0)
     order = 2
     c, h, w = fields.shape
@@ -48,7 +49,7 @@ def pad_fields(field_now, field_prev, half_pad_kernel=None):
     assert kernel.shape == (4, 2 * order, 2, 3)
 
     ft = fields[:,:2,:]
-    fb = fields[:,-2:,:].flip([2])
+    fb = fields[:,-2:,:].flip([1])
     ftb = torch.stack((ft, fb), dim=0)
     ftb = poly(ftb, order, dim=1)
     assert ftb.shape == (2, 2 * order, 2, w)
@@ -58,13 +59,13 @@ def pad_fields(field_now, field_prev, half_pad_kernel=None):
     fields = torch.cat((
         ftb[0].reshape(2, 2, w),
         fields,
-        ftb[1].flip([0]).reshape(2, 2, w)
+        ftb[1].reshape(2, 2, w).flip([1])
     ), dim=1)
 
     assert fields.shape == (2, h + 4, w)
 
     fl = fields[:,:,:2].permute(0,2,1)
-    fr = fields[:,:,-2:].permute(0,2,1).flip([2])
+    fr = fields[:,:,-2:].permute(0,2,1).flip([1])
     flr = torch.stack((fl, fr), dim=0)
     flr = poly(flr, order, dim=1)
     assert flr.shape == (2, 2 * order, 2, h + 4)
@@ -74,7 +75,7 @@ def pad_fields(field_now, field_prev, half_pad_kernel=None):
     fields = torch.cat((
         flr[0].reshape(2, 2, h + 4).permute(0, 2, 1),
         fields,
-        flr[1].flip([0]).reshape(2, 2, h + 4).permute(0, 2, 1),
+        flr[1].reshape(2, 2, h + 4).permute(0, 2, 1).flip([2])
     ), dim=2)
 
     assert fields.shape == (2, h + 4, w + 4)
