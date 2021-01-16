@@ -84,7 +84,7 @@ def cutout_square(barrier, y, x, size, angle):
     rotmat = torch.tensor([
         [ c, s]
         [-s, c]
-    ])
+    ], dtype=torch.float)
     disps_rot = torch.matmul(disps, rotmat)
     halfsize = size / 2
     mask = (disps_rot[:,:,0] >= halfsize) * (disps_rot[:,:,1] >= halfsize)
@@ -94,14 +94,14 @@ def sdf_batch_circle(coordinates_yx_batch, circle_y, circle_x, circle_r):
     assert(len(coordinates_yx_batch.shape) == 2)
     assert(coordinates_yx_batch.shape[0] == 2)
     dev = coordinates_yx_batch.device
-    circle_yx = torch.tensor([circle_y, circle_x]).unsqueeze(-1).to(dev)
+    circle_yx = torch.tensor([circle_y, circle_x], dtype=torch.float).unsqueeze(-1).to(dev)
     return torch.sqrt(torch.sum((coordinates_yx_batch - circle_yx)**2, dim=0)) - circle_r
 
 def sdf_batch_rectangle(coordinates_yx_batch, rect_y, rect_x, rect_h, rect_w, rect_angle):
     assert(len(coordinates_yx_batch.shape) == 2)
     assert(coordinates_yx_batch.shape[0] == 2)
     dev = coordinates_yx_batch.device
-    rect_yx = torch.tensor([rect_y, rect_x]).unsqueeze(-1).to(dev)
+    rect_yx = torch.tensor([rect_y, rect_x], dtype=torch.float).unsqueeze(-1).to(dev)
 
     disps = coordinates_yx_batch - rect_yx
     c = math.cos(-rect_angle)
@@ -111,7 +111,7 @@ def sdf_batch_rectangle(coordinates_yx_batch, rect_y, rect_x, rect_h, rect_w, re
     disps_rot = torch.stack((rot_y, rot_x), dim=0)
     abs_disps_rot = torch.abs(disps_rot)
 
-    rect_hw_halved = torch.tensor([rect_h * 0.5, rect_w * 0.5]).unsqueeze(-1).to(dev)
+    rect_hw_halved = torch.tensor([rect_h * 0.5, rect_w * 0.5], dtype=torch.float).unsqueeze(-1).to(dev)
     edgeDisp = torch.abs(abs_disps_rot) - rect_hw_halved
     outerDist = torch.sqrt(torch.sum(torch.clamp(edgeDisp, min=0.0)**2, dim=0))
     innerDist = torch.clamp(torch.max(edgeDisp, dim=0)[0], max=0.0)
@@ -146,7 +146,7 @@ def heatmap_batch_circle(coordinates_yx_batch, circle_y, circle_x, circle_r):
     assert(len(coordinates_yx_batch.shape) == 2)
     assert(coordinates_yx_batch.shape[0] == 2)
     dev = coordinates_yx_batch.device
-    circle_yx = torch.tensor([circle_y, circle_x]).unsqueeze(-1).to(dev)
+    circle_yx = torch.tensor([circle_y, circle_x], dtype=torch.float).unsqueeze(-1).to(dev)
     dists = torch.sum((coordinates_yx_batch - circle_yx)**2, dim=0)
     ret = torch.zeros(coordinates_yx_batch.shape[1])
     ret[dists <= circle_r**2] = 1.0
@@ -156,7 +156,7 @@ def heatmap_batch_rectangle(coordinates_yx_batch, rect_y, rect_x, rect_h, rect_w
     assert(len(coordinates_yx_batch.shape) == 2)
     assert(coordinates_yx_batch.shape[0] == 2)
     dev = coordinates_yx_batch.device
-    rect_yx = torch.tensor([rect_y, rect_x]).unsqueeze(-1).to(dev)
+    rect_yx = torch.tensor([rect_y, rect_x], dtype=torch.float).unsqueeze(-1).to(dev)
     disps = coordinates_yx_batch - rect_yx
 
     c = math.cos(-rect_angle)
@@ -375,7 +375,7 @@ def red_white_blue_banded(img):
         dim=2
     ) * (0.5 + 0.5 * x.unsqueeze(-1))
     z = torch.clamp(1.0 - 50.0 * torch.abs(img), min=0.0, max=1.0).unsqueeze(-1)
-    z_color = torch.tensor([0.0, 0.5, 0.0]).unsqueeze(0).unsqueeze(0).to(img.device)
+    z_color = torch.tensor([0.0, 0.5, 0.0], dtype=torch.float).unsqueeze(0).unsqueeze(0).to(img.device)
     rgb = rgb + (z_color - rgb) * z
     return rgb
 
@@ -385,9 +385,9 @@ def red_white_blue(img):
     close_to_one  = torch.clamp((2.0 * img - 1.0), 0.0, 1.0)
     close_to_half = torch.clamp((1.0 - 2.0 * torch.abs(img - 0.5)), 0.0, 1.0)
     close_to_zero = torch.clamp((1.0 - 2.0 * img), 0.0, 1.0)
-    red   = torch.tensor([0.71, 0.01, 0.15]).reshape(1, 1, 3)
-    white = torch.tensor([1.00, 1.00, 1.00]).reshape(1, 1, 3)
-    blue  = torch.tensor([0.23, 0.30, 0.75]).reshape(1, 1, 3)
+    red   = torch.tensor([0.71, 0.01, 0.15], dtype=torch.float).reshape(1, 1, 3)
+    white = torch.tensor([1.00, 1.00, 1.00], dtype=torch.float).reshape(1, 1, 3)
+    blue  = torch.tensor([0.23, 0.30, 0.75], dtype=torch.float).reshape(1, 1, 3)
     return close_to_one * red + close_to_half * white + close_to_zero * blue
     
 
@@ -591,7 +591,7 @@ def make_implicit_outputs(obs, params, representation):
         for i in range(num):
             p = params[i]
             v = line_of_sight_from_bottom_up(obs, p[0])
-            output[i] = torch.tensor(v)
+            output[i] = torch.tensor(v, dtype=torch.float)
         return output
     else:
         raise Exception("Unrecognized representation")

@@ -50,7 +50,7 @@ class WaveSimDataset(torch.utils.data.Dataset):
         for i, path in enumerate(filenames):
             with open(path, "rb") as file:
                 data = pickle.load(file)
-            impulse_responses = torch.tensor(data["impulse_responses"]).float()
+            impulse_responses = torch.tensor(data["impulse_responses"], dtype=torch.float)
             obstacles = data["obstacles"]
             occlusion = data["occlusion"]
             if not example_should_be_used(obstacles, occlusion, self._training_config):

@@ -18,7 +18,7 @@ def render_wave_sound(field, receiver_locations, num_samples, rate_hertz, output
         data.append(s)
         if i % 100 == 99 or i == (num_samples - 1):
             progress_bar(i, num_samples)
-    data = torch.tensor(data)
+    data = torch.tensor(data, dtype=torch.float)
     data = normalize_amplitude(data)
     print("\nSaving sound to {}".format(output_path))
     wf.write(output_path, rate_hertz, data.detach().numpy())

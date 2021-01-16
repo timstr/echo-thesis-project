@@ -248,7 +248,7 @@ def main():
             the_input = (the_input - the_input_min) / (the_input_max - the_input_min)
             spectrogram_img_grid = torchvision.utils.make_grid(
                 the_input.unsqueeze(1).repeat(1, 3, 1, 1),
-                nrow=1
+                nrow=2
             )
             plt_axis.imshow(spectrogram_img_grid.permute(1, 2, 0))
             plt_axis.axis("off")

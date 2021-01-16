@@ -21,7 +21,7 @@ def main():
     emitter_radius = 2
     num_emitters = len(wavesim_emitter_locations)
 
-    receiver_locations = torch.tensor(wavesim_receiver_locations)
+    receiver_locations = torch.tensor(wavesim_receiver_locations, dtype=torch.float)
     num_receivers = len(receiver_locations)
     receiver_indices_chunked = receiver_locations.t().chunk(chunks=num_receivers, dim=0)
 

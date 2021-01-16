@@ -30,7 +30,7 @@ def main():
 
     def run_simulation(half_pad_kernel, graph_axis, animate=True, num_batches=1, skip_frames=0, num_steps=800):
 
-        loss = torch.tensor(0.0).to(the_device)
+        loss = torch.tensor(0.0, dtype=torch.float).to(the_device)
 
         for b in range(num_batches):
             # initial condition
@@ -78,7 +78,7 @@ def main():
 
     with open("sim_params/current/v7/sim_params_latest.pkl", "rb") as f:
         params = pickle.load(f)
-        half_pad_kernel = torch.tensor(params["half_pad_kernel"]).to(the_device)
+        half_pad_kernel = torch.tensor(params["half_pad_kernel"], dtype=torch.float).to(the_device)
         # half_pad_kernel = torch.cat((
         #     half_pad_kernel,
         #     torch.zeros(2, 2, 2, 2).to(the_device)

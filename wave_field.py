@@ -47,7 +47,7 @@ class Field():
             return
 
         if len(self._obstacles) == 0:
-            self._barrier = torch.tensor([[1.0]]).to(the_device)
+            self._barrier = torch.tensor([[1.0]], dtype=torch.float).to(the_device)
             return
         
         coordinates_yx_batch = all_yx_locations(self._size)
