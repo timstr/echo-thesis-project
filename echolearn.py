@@ -38,7 +38,6 @@ def plt_screenshot():
 def main():
     parser = ArgumentParser()
     parser.add_argument("--experiment", type=str, dest="experiment", required=True)
-    parser.add_argument("--dataset", type=str, dest="dataset", default="v8")
     parser.add_argument("--maxexamples", type=int, dest="maxexamples", default=None)
     parser.add_argument("--batchsize", type=int, dest="batchsize", default=4)
     parser.add_argument("--receivercount", type=int, choices=[1, 2, 4, 8, 16, 32, 64], dest="receivercount", default=8)
