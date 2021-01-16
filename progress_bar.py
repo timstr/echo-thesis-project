@@ -1,7 +1,7 @@
 import sys
 
 def progress_bar(current, total):
-    if sys.stdout.isatty():
+    if not sys.stdout.isatty():
         return
     i = current + 1
     bar_fill = '=' * (i * 50 // total)
