@@ -8,11 +8,10 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
-import math
 import numpy as np
 import datetime
 import PIL.Image
-import random
+from the_device import the_device
 from custom_collate_fn import custom_collate
 from device_dict import DeviceDict
 from progress_bar import progress_bar
@@ -93,7 +92,7 @@ def main():
         losses = []
         with torch.no_grad():
             for i, batch in enumerate(val_loader):
-                batch = batch.to("cuda")
+                batch = batch.to(the_device)
                 pred = model(batch)
                 loss, _ = reconstructionLoss(batch, pred)
                 losses.append(loss.item())

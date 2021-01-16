@@ -3,16 +3,16 @@ from argparse import ArgumentParser
 import matplotlib.animation
 import matplotlib.pyplot as plt
 
+from the_device import the_device
 from dataset import WaveSimDataset
 from device_dict import DeviceDict
 from custom_collate_fn import custom_collate
 from progress_bar import progress_bar
 from featurize import make_sdf_image_gt, make_sdf_image_pred
-from ObstacleSDFNet import ObstacleSDFNet
 
 def load_model(path):
     filename = "models/" + path
-    network = ObstacleSDFNet().cuda()
+    network = ObstacleSDFNet().to(the_device)
     print("Loading model from \"{}\"".format(filename))
     network.load_state_dict(torch.load(filename))
     network.eval()

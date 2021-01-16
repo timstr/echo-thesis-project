@@ -3,7 +3,6 @@ import fix_dead_command_line
 
 from dataset_config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
 import torch
-import torch.nn as nn
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from argparse import ArgumentParser
@@ -13,8 +12,8 @@ import math
 import numpy as np
 import datetime
 import PIL.Image
-import random
 
+from the_device import the_device
 from device_dict import DeviceDict
 from dataset import WaveSimDataset
 from progress_bar import progress_bar
@@ -197,7 +196,7 @@ def main():
                 
                 losses_batch = []
                 for b in batches:
-                    b = b.to("cuda")
+                    b = b.to(the_device)
                     pred = model(b)
                     pred = pred["output"][:, 0]
                     gt = b["output"]
@@ -205,7 +204,7 @@ def main():
                     losses_batch.append(loss.item())
                 losses.append(np.mean(np.asarray(losses_batch)))
             else:
-                batch = batch.to("cuda")
+                batch = batch.to(the_device)
                 pred = model(batch)
                 pred = pred["output"][:, 0]
                 gt = batch["output"]
@@ -219,7 +218,7 @@ def main():
     network = NetworkType(
         input_config=input_config,
         output_config=output_config
-    ).cuda()
+    ).to(the_device)
 
     model_path = os.environ.get("TRAINING_MODEL_PATH")
 
@@ -372,7 +371,7 @@ def main():
             train_iter = iter(train_loader)
             for i in range(len(train_loader)):
                 batch_cpu = next(train_iter)
-                batch_gpu = batch_cpu.to('cuda')
+                batch_gpu = batch_cpu.to(the_device)
 
                 pred_gpu = network(batch_gpu)
                 pred_cpu = pred_gpu.to('cpu')

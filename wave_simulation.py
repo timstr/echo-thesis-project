@@ -1,6 +1,8 @@
 import torch
 import math
 
+from the_device import the_device
+
 def poly(x, n, dim):
     return torch.cat([x**(i + 1) for i in range(n)], dim=dim)
 
@@ -29,12 +31,12 @@ half_pad_kernel_optimized = torch.tensor([
         [[ 9.7290548e-03,  4.4364929e-03], [ 9.6077397e-03, -4.0058928e-04]],
         [[-1.3560701e-02,  7.6356144e-03], [ 5.1978737e-04, -3.3461576e-05]]
     ]
-], dtype=torch.float32).cuda()
+], dtype=torch.float32).to(the_device)
 
 def pad_fields(field_now, field_prev, half_pad_kernel=None):
     if half_pad_kernel is None:
         half_pad_kernel = half_pad_kernel_optimized
-        # half_pad_kernel = torch.zeros(4, 4, 2, 2).cuda()
+        # half_pad_kernel = torch.zeros(4, 4, 2, 2).to(the_device)
     fields = torch.stack((field_now, field_prev), dim=0)
     order = 2
     c, h, w = fields.shape

@@ -7,6 +7,7 @@ import itertools
 
 from torch import linspace
 
+from the_device import the_device
 from device_dict import DeviceDict
 
 CIRCLE = "Circle"
@@ -36,7 +37,7 @@ receiver_locations = [
 
 
 def all_yx_locations(size):
-    ls = torch.linspace(0, 1, size).cuda()
+    ls = torch.linspace(0, 1, size).to(the_device)
     return torch.stack(
         torch.meshgrid(ls, ls),
         dim=2
@@ -409,7 +410,7 @@ def make_depthmap_gt(example, img_size):
     return arr
 
 def make_depthmap_pred(example, img_size, network):
-    locations = torch.linspace(0, 1, img_size).reshape(1, img_size, 1).cuda()
+    locations = torch.linspace(0, 1, img_size).reshape(1, img_size, 1).to(the_device)
     d = DeviceDict({
         "input": example["input"][:1],
         "params": locations

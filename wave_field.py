@@ -1,11 +1,9 @@
 import torch
-import random
-import math
 
 from wave_simulation import step_simulation
 from featurize import CIRCLE, RECTANGLE, make_random_obstacles, all_yx_locations, heatmap_batch
 
-
+from the_device import the_device
 
 # TODO: test whether doing convolutions in-place is faster (e.g. using torch's `out` parameters)
 
@@ -14,8 +12,8 @@ class Field():
         self._size = size
         self._obstacles = []
         self._dirty_barrier = True
-        self._field_now = torch.zeros(size, size).cuda()
-        self._field_prev = torch.zeros(size, size).cuda()
+        self._field_now = torch.zeros(size, size).to(the_device)
+        self._field_prev = torch.zeros(size, size).to(the_device)
 
     def get_size(self):
         return self._size
