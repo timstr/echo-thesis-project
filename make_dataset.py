@@ -36,7 +36,7 @@ def main():
             obstacles = all_obstacles[example_index]
             field.add_obstacles(obstacles)
             print("Simulating waves")
-            receiver_buf = torch.zeros(num_emitters, num_receivers, wavesim_duration).cuda()
+            receiver_buf = torch.zeros(num_emitters, num_receivers, wavesim_duration).to(the_device)
             for i_emitter, (emitter_y, emitter_x) in enumerate(wavesim_emitter_locations):
                 field.silence()
                 field.get_field()[

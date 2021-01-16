@@ -6,6 +6,7 @@ import math
 import sys
 import pickle
 
+from the_device import the_device
 from wave_simulation import step_simulation
 
 def make_field_image(field):
@@ -29,12 +30,12 @@ def main():
 
     def run_simulation(half_pad_kernel, graph_axis, animate=True, num_batches=1, skip_frames=0, num_steps=800):
 
-        loss = torch.tensor(0.0).cuda()
+        loss = torch.tensor(0.0).to(the_device)
 
         for b in range(num_batches):
             # initial condition
-            field_now = torch.zeros(size, size).cuda()
-            field_prev = torch.zeros(size, size).cuda()
+            field_now = torch.zeros(size, size).to(the_device)
+            field_prev = torch.zeros(size, size).to(the_device)
             rad = 6
             res = 3
             rand_init = torch.rand(rad//res, rad//res).repeat_interleave(res, dim=0).repeat_interleave(res, dim=1) * 2.0 - 1.0
@@ -73,14 +74,14 @@ def main():
         return loss
 
 
-    # half_pad_kernel = torch.zeros(4, 4, 2, 2).cuda()
+    # half_pad_kernel = torch.zeros(4, 4, 2, 2).to(the_device)
 
     with open("sim_params/current/v7/sim_params_latest.pkl", "rb") as f:
         params = pickle.load(f)
-        half_pad_kernel = torch.tensor(params["half_pad_kernel"]).cuda()
+        half_pad_kernel = torch.tensor(params["half_pad_kernel"]).to(the_device)
         # half_pad_kernel = torch.cat((
         #     half_pad_kernel,
-        #     torch.zeros(2, 2, 2, 2).cuda()
+        #     torch.zeros(2, 2, 2, 2).to(the_device)
         # ), dim=1)
 
     half_pad_kernel = torch.nn.Parameter(half_pad_kernel, requires_grad=True)

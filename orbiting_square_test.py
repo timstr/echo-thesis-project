@@ -1,3 +1,4 @@
+from EchoLearnNN import EchoLearnNN
 import torch
 from argparse import ArgumentParser
 import matplotlib.animation
@@ -12,7 +13,7 @@ from featurize import make_sdf_image_gt, make_sdf_image_pred
 
 def load_model(path):
     filename = "models/" + path
-    network = ObstacleSDFNet().to(the_device)
+    network = EchoLearnNN().to(the_device)
     print("Loading model from \"{}\"".format(filename))
     network.load_state_dict(torch.load(filename))
     network.eval()
@@ -37,7 +38,7 @@ def render_test_animation(network):
     # )
     it = iter(ld)
     def next_data():
-        batch = next(it).to('cuda')
+        batch = next(it).to(the_device)
         return make_sdf_image_pred(batch, 32, network)
         # return make_sdf_image_gt(batch, 32)
     

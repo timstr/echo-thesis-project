@@ -47,13 +47,13 @@ class Field():
             return
 
         if len(self._obstacles) == 0:
-            self._barrier = torch.tensor([[1.0]]).cuda()
+            self._barrier = torch.tensor([[1.0]]).to(the_device)
             return
         
         coordinates_yx_batch = all_yx_locations(self._size)
 
         self._barrier = heatmap_batch(coordinates_yx_batch, self._obstacles)
-        self._barrier = self._barrier.reshape(self._size, self._size).cuda()
+        self._barrier = self._barrier.reshape(self._size, self._size).to(the_device)
         self._barrier = 1.0 - self._barrier
 
         self._dirty_barrier = False

@@ -99,7 +99,7 @@ def main():
                 progress_bar(i, len(val_loader))
             return np.mean(np.asarray(losses))
 
-    network = BatGNet(debug_mode=True).cuda()
+    network = BatGNet(debug_mode=True).to(the_device)
 
     def plot_spectrograms(plt_axis, spectrograms):
         assert spectrograms.shape == (8, 256, 256)
@@ -163,7 +163,7 @@ def main():
             train_iter = iter(train_loader)
             for i in range(len(train_loader)):
                 batch_cpu = next(train_iter)
-                batch_gpu = batch_cpu.to('cuda')
+                batch_gpu = batch_cpu.to(the_device)
 
                 pred_gpu = network(batch_gpu)
                 
@@ -198,7 +198,7 @@ def main():
                 if ((global_iteration + 1) % args.plotinterval) == 0:
                     pred_cpu = pred_gpu.to('cpu')
                     val_batch_cpu = next(iter(val_loader))
-                    val_batch_gpu = val_batch_cpu.to('cuda')
+                    val_batch_gpu = val_batch_cpu.to(the_device)
 
                     # clear figures for a new update
                     ax_t1.cla()

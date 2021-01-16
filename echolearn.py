@@ -412,7 +412,7 @@ def main():
 
                 if time_to_plot and (not args.nodisplay or time_to_save_figure):
                     val_batch_cpu = next(iter(val_loader))
-                    val_batch_gpu = val_batch_cpu.to('cuda')
+                    val_batch_gpu = val_batch_cpu.to(the_device)
 
                     # clear figures for a new update
                     ax_t1.cla()

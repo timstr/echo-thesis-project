@@ -573,7 +573,7 @@ def make_implicit_params_validation(img_size, representation):
     return torch.stack(
         torch.meshgrid(ls, ls),
         dim=2
-    ).cuda().reshape(1, img_size**2, 2)
+    ).to(the_device).reshape(1, img_size**2, 2)
 
 def make_implicit_outputs(obs, params, representation):
     assert(len(params.shape) == 2)
