@@ -7,7 +7,7 @@ import math
 def make_spectrogram_single(audio_raw):
     assert len(audio_raw.shape) == 1
     assert(audio_raw.shape[0] > 256)
-    window_size = 128
+    window_size = 64
     num_frequency_bins = 10
     f, t, Sxx = scipy.signal.spectrogram(
         audio_raw,

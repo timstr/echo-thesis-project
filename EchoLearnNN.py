@@ -1,9 +1,11 @@
-from log_layer import Log
 from device_dict import DeviceDict
-from dataset_config import InputConfig, OutputConfig
 import torch
 import torch.nn as nn
+
+from dataset_config import InputConfig, OutputConfig
 from reshape_layer import Reshape
+from permute_layer import Permute
+from log_layer import Log
 
 class EchoLearnNN(nn.Module):
     def __init__(self, input_config, output_config):
@@ -16,19 +18,19 @@ class EchoLearnNN(nn.Module):
         
         print("Constructing network model:")
         print(f"  Input:")
-        print(f"    format:     {self._input_config.format}")
-        print(f"    dimensions: {self._input_config.dims}")
-        print(f"    channels:   {self._input_config.num_channels}")
+        print(f"    format:        : {self._input_config.format}")
+        print(f"    dimensions:    : {self._input_config.dims}")
+        print(f"    channels:      : {self._input_config.num_channels}")
+        print(f"    summary stats? : {self._input_config.summary_statistics}")
         print(f"  Output ({'implicit' if self._output_config.implicit else 'dense'}):")
-        print(f"    format:     {self._output_config.format}")
-        print(f"    dimensions: {self._output_config.dims}")
-        print(f"    variance?:  {self._output_config.predict_variance}")
-        print(f"    channels:   {self._output_config.num_channels}")
+        print(f"    format:        : {self._output_config.format}")
+        print(f"    dimensions:    : {self._output_config.dims}")
+        print(f"    variance?:     : {self._output_config.predict_variance}")
+        print(f"    channels:      : {self._output_config.num_channels}")
         if self._output_config.implicit:
             print(f"    params:     {self._output_config.num_implicit_params}")
         else:
             print(f"    resolution: {self._output_config.resolution}")
-        print("")
         
         def makeConvDown(in_channels, out_channels, dims):
             assert dims in [1, 2]
@@ -94,27 +96,30 @@ class EchoLearnNN(nn.Module):
         channels_in = self._input_config.num_channels
         channels_out = self._output_config.num_channels
 
+
         if self._input_config.format == "spectrogram":
             self.convIn = nn.Sequential(
                 makeConvDown(channels_in, 16, dims_in),
                 makeConvDown(16, 32, dims_in),
                 makeConvDown(32, 32, dims_in),
-                makeConvDown(32, 32, dims_in),
-                makeConvDown(32, 32, dims_in),
-                Reshape((32, 3, 4), (32, 12))
+                makeConvDown(32, 64, dims_in),
+                makeConvDown(64, 64, dims_in),
+                Reshape((64,2,8), (128,8))
             )
-            fcInputs = 32*4
+            intermediate_width=8
+            intermediate_channels=128
         elif self._input_config.format in ["audioraw", "audiowaveshaped"]:
             self.convIn = nn.Sequential(
                 makeConvDown(channels_in, 16, dims_in),
                 makeConvDown(16, 16, dims_in),
                 makeConvDown(16, 32, dims_in),
-                makeConvDown(32, 64, dims_in),
-                makeConvDown(64, 64, dims_in),
-                makeConvDown(64, 128, dims_in),
-                Reshape((128,4), (128,4)) # TODO: double-check
+                makeConvDown(32, 32, dims_in),
+                makeConvDown(32, 32, dims_in),
+                makeConvDown(32, 32, dims_in),
+                Reshape((32,32), (32,32)) # safety check
             )
-            fcInputs = 256
+            intermediate_width=32
+            intermediate_channels=32
         else:
             raise Exception(f"Unrecognized input format: '{self._input_config.format}'")
 
@@ -124,21 +129,22 @@ class EchoLearnNN(nn.Module):
         # - average (across channel values)
         # - variance (accross channel values)
         # Total: 4
+        num_summary_stats = 4
+        
+        fc_inputs = (intermediate_channels * num_summary_stats) if self._input_config.summary_statistics else (intermediate_channels * intermediate_width)
 
-        # pooling layer: summary statistics of 32 channels across 64 pixels
-        # resulting in 32 channels x 4 statistics = 128 features
-
-
+        print(f"  Middle:")
+        print(f"    FC input size  : {fc_inputs} + {self._output_config.num_implicit_params}")
+        print("")
+        
         self.fullyConnected = nn.Sequential(
-            makeFullyConnected(fcInputs + self._output_config.num_implicit_params, 128),
-            makeFullyConnected(128, 128),
-            makeFullyConnected(128, 256),
-            makeFullyConnected(256, 512)
+            makeFullyConnected(fc_inputs + self._output_config.num_implicit_params, 128),
+            makeFullyConnected(128, 512)
         )
 
         if self._output_config.implicit:
             self.final = makeFullyConnected(512, channels_out, activation=False)
-        elif self._output_config.dims == 1:
+        elif dims_out == 1:
             assert(self._output_config.resolution >= 16)
             convsFlex = ()
             output_size = 16
@@ -154,7 +160,7 @@ class EchoLearnNN(nn.Module):
                 *convsFlex,                      # (final size)
                 makeConvSame(32, channels_out, kernel_size=1, dims=1, activation=False),
             )
-        elif self._output_config.dims == 2:
+        elif dims_out == 2:
             assert(self._output_config.resolution >= 8)
             convsFlex = ()
             output_size = 16
@@ -182,29 +188,32 @@ class EchoLearnNN(nn.Module):
 
         wx = self.convIn(w0)
 
-        assert(len(wx.shape) == 3) # (B, 32, 64))
+        assert(len(wx.shape) == 3)
 
         F = wx.shape[1]
         N = wx.shape[2]
 
-        ls = torch.linspace(0.0, 1.0, N).unsqueeze(0).unsqueeze(0).to(wx.device)
+        if self._input_config.summary_statistics:
+            ls = torch.linspace(0.0, 1.0, N).unsqueeze(0).unsqueeze(0).to(wx.device)
 
-        mom1 = torch.sum(wx * ls, dim=2)
-        assert(mom1.shape == (B, F))
+            mom1 = torch.sum(wx * ls, dim=2)
+            assert(mom1.shape == (B, F))
 
-        mom2 = torch.sum((wx * (ls - mom1.unsqueeze(-1)))**2, dim=2)
-        assert(mom2.shape == (B, F))
+            mom2 = torch.sum((wx * (ls - mom1.unsqueeze(-1)))**2, dim=2)
+            assert(mom2.shape == (B, F))
 
-        mean = torch.mean(wx, dim=2)
-        assert(mean.shape == (B, F))
+            mean = torch.mean(wx, dim=2)
+            assert(mean.shape == (B, F))
 
-        variance = torch.var(wx, dim=2)
-        assert(variance.shape == (B, F))
+            variance = torch.var(wx, dim=2)
+            assert(variance.shape == (B, F))
 
-        summary_stats = torch.stack((mom1, mom2, mean, variance), dim=2)
-        assert(summary_stats.shape == (B, F, 4))
+            summary_stats = torch.stack((mom1, mom2, mean, variance), dim=2)
+            assert(summary_stats.shape == (B, F, 4))
 
-        summary_stats = summary_stats.reshape(B, F * 4)
+            fc_input = summary_stats.reshape(B, F * 4)
+        else:
+            fc_input = wx.reshape(B, -1)
 
         res = self._output_config.resolution
         out_dims = self._output_config.dims
@@ -220,8 +229,7 @@ class EchoLearnNN(nn.Module):
 
             assert(implicit_params.shape == (B, param_batch_size, num_params))
 
-            summary_stats_flat = summary_stats.repeat_interleave(param_batch_size, dim=0)
-            assert(summary_stats_flat.shape == (B * param_batch_size, F * 4))
+            summary_stats_flat = fc_input.repeat_interleave(param_batch_size, dim=0)
 
             implicit_params_flat = implicit_params.reshape(B * param_batch_size, num_params)
 
@@ -236,7 +244,7 @@ class EchoLearnNN(nn.Module):
             output = output.permute(0, 2, 1)
             assert(output.shape == (B, out_channels, param_batch_size))
         else:
-            v0 = summary_stats
+            v0 = fc_input
             v1 = self.fullyConnected(v0)
             output = self.final(v1)
             assert output.shape == ((B, out_channels) + ((res,) * out_dims))

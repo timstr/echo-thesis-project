@@ -5,8 +5,6 @@ from functools import reduce
 def prod(iterable, start=1):
     return reduce(lambda a, b: a * b, iterable, start)
 
-from device_dict import DeviceDict
-
 class Reshape(nn.Module):
     def __init__(self, input_shape, output_shape):
         super(Reshape, self).__init__()

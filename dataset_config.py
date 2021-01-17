@@ -146,12 +146,13 @@ def combine_emitted_signals(impulse_responses, emitter_config, receiver_config):
     return out_signal
 
 class InputConfig:
-    def __init__(self, receiver_config, format="spectrogram"):
+    def __init__(self, receiver_config, format="spectrogram", summary_statistics=True):
         assert format in ["audioraw", "audiowaveshaped", "spectrogram"]
         assert isinstance(receiver_config, ReceiverConfig)
         self.format = format
         self.dims = 2 if (self.format == "spectrogram") else 1
         self.num_channels = receiver_config.count # TODO: change this in case of GCC-PHAT
+        self.summary_statistics = summary_statistics
 
 class OutputConfig:
     def __init__(self, format="sdf", implicit=True, predict_variance=True, resolution=1024):

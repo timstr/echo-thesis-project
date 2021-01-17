@@ -8,7 +8,7 @@ from dataset import WaveSimDataset
 from featurize import make_depthmap_gt, make_heatmap_image_gt, make_sdf_image_gt, obstacles_occluded, red_white_blue_banded
 
 def main():
-    tcfg = TrainingConfig(max_examples=None)
+    tcfg = TrainingConfig(max_examples=128)
     ecfg = EmitterConfig()
     rcfg = ReceiverConfig()
     icfg = InputConfig(rcfg, format="spectrogram")
@@ -21,8 +21,8 @@ def main():
     if animate:
         plt.ion()
 
-    for i in range(6166, 7331):
-    # for i in range(7331):
+    # for i in range(6166, 7331):
+    for i in range(7331):
 
         example = wsds[i]
         # example = wsds[61]
@@ -43,7 +43,7 @@ def main():
         plt.show()
 
         
-        print("Obstacles depthmap")
+        # print("Obstacles depthmap")
         plt.cla()
         plt.plot(make_depthmap_gt(dummy_batch, 512).cpu() * 512)
         plt.gca().set_ylim([0.0, 512.0])
@@ -56,7 +56,7 @@ def main():
         # else:
         #     plt.show()
 
-        print("Obstacles signed distance field")
+        # print("Obstacles signed distance field")
         plt.cla()
         plt.imshow(red_white_blue_banded(make_sdf_image_gt(dummy_batch, 512)).cpu())
         plt.show()

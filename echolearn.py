@@ -59,6 +59,7 @@ def main():
     parser.add_argument("--resolution", type=int, dest="resolution", default=128)
     parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram"], required=True)
     parser.add_argument("--nnoutput", type=str, dest="nnoutput", choices=["sdf", "heatmap", "depthmap"], required=True)
+    parser.add_argument("--summarystatistics", dest="summarystatistics", default=False, action="store_true")
     parser.add_argument("--simplenn", dest="simplenn", default=False, action="store_true")
     parser.add_argument("--plotinterval", type=int, dest="plotinterval", default=32)
     parser.add_argument("--validationinterval", type=int, dest="validationinterval", default=256)
@@ -82,7 +83,8 @@ def main():
 
     input_config = InputConfig(
         format=args.nninput,
-        receiver_config=receiver_config
+        receiver_config=receiver_config,
+        summary_statistics=args.summarystatistics
     )
 
     output_config = OutputConfig(
@@ -239,7 +241,7 @@ def main():
         the_input = batch['input'][0].detach()
         if (len(the_input.shape) == 2):
             plt_axis.set_ylim(-1, 1)
-            for j in range(args.receivers):
+            for j in range(args.receivercount):
                 plt_axis.plot(the_input[j].detach())
         else:
             the_input_min = torch.min(the_input)
@@ -247,7 +249,7 @@ def main():
             the_input = (the_input - the_input_min) / (the_input_max - the_input_min)
             spectrogram_img_grid = torchvision.utils.make_grid(
                 the_input.unsqueeze(1).repeat(1, 3, 1, 1),
-                nrow=2
+                nrow=1
             )
             plt_axis.imshow(spectrogram_img_grid.permute(1, 2, 0))
             plt_axis.axis("off")
