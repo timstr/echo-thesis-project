@@ -99,11 +99,13 @@ class WaveSimDataset(torch.utils.data.Dataset):
                     mask = y >= r
                     return mask
                 mask = torch.ones_like(output).bool()
-                while torch.any(mask):
+                iterations = 0
+                while iterations < 8: # and torch.any(mask):
                     params[mask] = make_implicit_params_train(spe, self._output_config.format)[mask]
                     output[mask] = make_implicit_outputs(obstacles, params, self._output_config.format)[mask]
                     m = maybe_accept(output, params)
                     mask[m] = False
+                    iterations += 1
 
             theDict["params"] = params
             theDict["output"] = output

@@ -3,19 +3,6 @@ from reshape_layer import Reshape
 import torch
 import torch.nn as nn
 
-import deform_conv_pytorch.deform_conv
-
-class DeformConv2D(nn.Module):
-    def __init__(self, inc, outc, kernel_size=3, padding=1, bias=None):
-        super(DeformConv2D, self).__init__()
-        self._defconv = deform_conv_pytorch.deform_conv.DeformConv2D(
-            inc, outc, kernel_size, padding, bias
-        )
-        self._offsets = torch.nn.Conv2d(inc, 18, kernel_size=kernel_size, stride=1, padding=padding)
-
-    def forward(self, x):
-        return self._defconv(x, self._offsets(x))
-
 def circle_c(*args):
     return torch.cat(args, dim=1)
 

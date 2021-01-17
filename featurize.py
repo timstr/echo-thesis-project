@@ -385,9 +385,11 @@ def red_white_blue(img):
     close_to_one  = torch.clamp((2.0 * img - 1.0), 0.0, 1.0)
     close_to_half = torch.clamp((1.0 - 2.0 * torch.abs(img - 0.5)), 0.0, 1.0)
     close_to_zero = torch.clamp((1.0 - 2.0 * img), 0.0, 1.0)
-    red   = torch.tensor([0.71, 0.01, 0.15], dtype=torch.float).reshape(1, 1, 3)
-    white = torch.tensor([1.00, 1.00, 1.00], dtype=torch.float).reshape(1, 1, 3)
-    blue  = torch.tensor([0.23, 0.30, 0.75], dtype=torch.float).reshape(1, 1, 3)
+    def colour(r, g, b):
+        return torch.tensor([r, g, b], dtype=torch.float, device=img.device).reshape(1, 1, 3)
+    red   = colour(0.71, 0.01, 0.15)
+    white = colour(1.00, 1.00, 1.00)
+    blue  = colour(0.23, 0.30, 0.75)
     return close_to_one * red + close_to_half * white + close_to_zero * blue
     
 
@@ -421,35 +423,6 @@ def make_depthmap_pred(example, img_size, network):
     outputDims = pred.shape[1]
     assert(pred.shape[2] == img_size)
     return pred.reshape(outputDims, img_size).detach().cpu()
-
-def center_and_undelay_signal(echo_signal, y, x):
-    """Shifts the input signal in time so that the expected time of wave arrival at the given location is always at the start of the signal"""
-    assert(echo_signal.shape == (4, 4096))
-
-    dist = math.hypot(y - 0.5, x - 0.5) + 0.05
-    center = int(dist * dataset_field_size * magic_speed_of_sound * 4096)
-    center = min(4096, center)
-
-    def impl(channel): #, receiver_y, receiver_x):
-        assert(channel.shape == (4096,))
-        # dist = math.hypot(y - receiver_y, x - receiver_x)
-        # center = int(dist * dataset_field_size * magic_speed_of_sound * 4096)
-        # center = min(4096, center)
-        shifted = torch.cat((
-            channel[center:],
-            torch.zeros(center)
-        ), dim=0)
-        assert(shifted.shape == (4096,))
-        return shifted
-    out = torch.stack((
-        impl(echo_signal[0]), #*receiver_locations[0]),
-        impl(echo_signal[1]), #*receiver_locations[1]),
-        impl(echo_signal[2]), #*receiver_locations[2]),
-        impl(echo_signal[3]), #*receiver_locations[3])
-    ), dim=0)
-    assert(out.shape == (4, 4096))
-    return out
-
 
 def obstacle_radius(o):
     t = o[0]

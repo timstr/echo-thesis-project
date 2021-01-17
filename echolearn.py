@@ -116,7 +116,7 @@ def main():
         receiver_config
     )
 
-    val_ratio = 1 / 8
+    val_ratio = 0.1
     val_size = int(len(ecds)*val_ratio)
     indices_val = list(range(0, val_size))
     indices_train = list(range(val_size, len(ecds)))
@@ -173,7 +173,8 @@ def main():
 
 
         log_numerator = -0.5 * squared_error * sigma_hat_inverse**2
-        log_denominator = math.log(sqrt2pi) - torch.log(sigma_hat_inverse)
+        sigma_hat_inverse_clamped = torch.clamp(sigma_hat_inverse, min=1e-6)
+        log_denominator = math.log(sqrt2pi) - torch.log(sigma_hat_inverse_clamped)
         log_phi = log_numerator - log_denominator
         nll = torch.mean(-log_phi)
         terms = {
@@ -406,12 +407,11 @@ def main():
                     writer.add_scalar("validation loss", curr_val_loss, global_iteration)
 
                 time_to_plot = ((global_iteration + 1) % args.plotinterval) == 0
-                time_to_save_figure = ((global_iteration + 1) % (args.plotinterval * 8)) == 0
 
                 if time_to_plot:
                     print("Epoch {}, iteration {} of {} ({} %), loss={}".format(e, i, len(train_loader), 100*i//len(train_loader), losses[-1]))
 
-                if time_to_plot and (not args.nodisplay or time_to_save_figure):
+                if time_to_plot:
                     val_batch_cpu = next(iter(val_loader))
                     val_batch_gpu = val_batch_cpu.to(the_device)
 
@@ -460,14 +460,11 @@ def main():
                     fig.canvas.draw()
                     fig.canvas.flush_events()
 
-                    if time_to_save_figure:
-                        plt_screenshot().save(log_path + "/image_" + str(global_iteration + 1) + ".png")
+                    plt_screenshot().save(log_path + "/image_" + str(global_iteration + 1) + ".png")
 
-                        # NOTE: this is done in the screenshot branch so that a screenshot with the final
-                        # performance is always included
-                        if args.iterations is not None and global_iteration > args.iterations:
-                            print("Done - desired iteration count was reached")
-                            return
+                    if args.iterations is not None and global_iteration > args.iterations:
+                        print("Done - desired iteration count was reached")
+                        return
 
                 global_iteration += 1
 
