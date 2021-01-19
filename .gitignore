@@ -6,3 +6,7 @@ models/
 *.mp4
 *.wav
 *.dat
+*.bat
+*.sh
+job_scripts/
+images/

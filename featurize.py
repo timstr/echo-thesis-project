@@ -197,13 +197,22 @@ def heatmap_batch(coordinates_yx_batch, obs):
         )[0]
     return vals
 
-def intersect_line_segment(ry, rx, dy, dx, p1y, p1x, p2y, p2x):
+def intersect_line_segment(ry_rx_dy_dx, p1y, p1x, p2y, p2x, no_collision_dist):
     """
         ry, rx   : ray (y,x) origin
         dy, dx   : ray (y,x) direction (expected to be a unit vector)
         p1y, p1x : point (y,x) for first end of line segment
         p2y, p2x : point (y,x) for second end of line segment
     """
+    assert len(ry_rx_dy_dx.shape) == 2
+    assert ry_rx_dy_dx.shape[0] == 4
+    N = ry_rx_dy_dx.shape[1]
+
+    ry = ry_rx_dy_dx[0]
+    rx = ry_rx_dy_dx[1]
+    dy = ry_rx_dy_dx[2]
+    dx = ry_rx_dy_dx[3]
+
     eps = 1e-6
 
     v1y = ry - p1y
@@ -214,52 +223,63 @@ def intersect_line_segment(ry, rx, dy, dx, p1y, p1x, p2y, p2x):
     v3y = dx
 
     v2_dot_v3 = (v2x * v3x) + (v2y * v3y)
-    if abs(v2_dot_v3) < eps:
-        return None
+
+    parallel = torch.abs(v2_dot_v3) < eps
     
 
     v1_dot_v3 = (v1x * v3x) + (v1y * v3y)
     t2 = v1_dot_v3 / v2_dot_v3
-    if t2 < 0.0 or t2 > 1.0:
-        return None
+
+    outside_segment = ~((t2 >= 0.0) * (t2 <= 1.0))
+    
 
     v2_cross_v1 = v2x * v1y - v2y * v1x
     t1 = v2_cross_v1 / v2_dot_v3
-    return t1
 
-def intersect_circle(ry, rx, dy, dx, sy, sx, sr):
+    out = t1
+    assert out.shape == (N,)
+    out[parallel] = no_collision_dist
+    out[outside_segment] = no_collision_dist
+    return out
+
+def intersect_circle(ry_rx_dy_dx, sy, sx, sr, no_collision_dist):
     """
         ry, rx : ray (y,x) origin
         dy, dx : ray (y,x) direction (expected to be a unit vector)
         sy, sx : shape y,x e.g. center of circle
         sr     : shape radius
     """
+    assert len(ry_rx_dy_dx.shape) == 2
+    assert ry_rx_dy_dx.shape[0] == 4
+    N = ry_rx_dy_dx.shape[1]
+    
+    ry = ry_rx_dy_dx[0]
+    rx = ry_rx_dy_dx[1]
+    dy = ry_rx_dy_dx[2]
+    dx = ry_rx_dy_dx[3]
+
     a = dy**2 + dx**2
     b = 2.0 * (dy * (ry - sy) + dx * (rx - sx))
     c = (ry - sy)**2 + (rx - sx)**2 - sr**2
 
     d = b**2 - 4.0 * a * c
 
-    if d < 0.0:
-        return None
+    no_solution = d < 0.0
 
-    sqrtd = math.sqrt(d)
+    sqrtd = torch.sqrt(d)
 
-    t0 = (-b - sqrtd) / (2.0 * a)
+    t = (-b - sqrtd) / (2.0 * a)
     t1 = (-b + sqrtd) / (2.0 * a)
 
-    e = 1e-6
+    # Assumption: ray is not inside circle
+    t1_lt_t = t1 < t
+    t[t1_lt_t] = t1[t1_lt_t]
 
-    if t0 > e:
-        if t1 > e:
-            return min(t0, t1)
-        return t0
-    else:
-        if t1 > e:
-            return t1
-        return None
+    t[no_solution] = no_collision_dist
 
-def intersect_rectangle(ry, rx, dy, dx, sy, sx, sh, sw, sa):
+    return t
+
+def intersect_rectangle(ry_rx_dy_dx, sy, sx, sh, sw, sa, no_collision_dist):
     """
         ry, rx : ray (y,x) origin
         dy, dx : ray (y,x) direction (expected to be a unit vector)
@@ -267,6 +287,10 @@ def intersect_rectangle(ry, rx, dy, dx, sy, sx, sh, sw, sa):
         sh, sw : shape height and width
         sa     : shape angle
     """
+    assert len(ry_rx_dy_dx.shape) == 2
+    assert ry_rx_dy_dx.shape[0] == 4
+    N = ry_rx_dy_dx.shape[1]
+    
     s = math.sin(sa)
     c = math.cos(sa)
     hsh = 0.5 * sh
@@ -283,53 +307,58 @@ def intersect_rectangle(ry, rx, dy, dx, sy, sx, sh, sw, sa):
     br = (sy + khy - kwy, sx + kwx + khx)
     bl = (sy + khy + kwy, sx - kwx + khx)
     
-    t_vals = [
-        intersect_line_segment(ry, rx, dy, dx, tl[0], tl[1], tr[0], tr[1]),
-        intersect_line_segment(ry, rx, dy, dx, tr[0], tr[1], br[0], br[1]),
-        intersect_line_segment(ry, rx, dy, dx, br[0], br[1], bl[0], bl[1]),
-        intersect_line_segment(ry, rx, dy, dx, bl[0], bl[1], tl[0], tl[1]),
-    ]
+    t_vals = torch.stack((
+        intersect_line_segment(ry_rx_dy_dx, *tl, *tr, no_collision_dist),
+        intersect_line_segment(ry_rx_dy_dx, *tr, *br, no_collision_dist),
+        intersect_line_segment(ry_rx_dy_dx, *br, *bl, no_collision_dist),
+        intersect_line_segment(ry_rx_dy_dx, *bl, *tl, no_collision_dist),
+    ), dim=0)
 
-    isSomething = lambda x : x is not None
+    min_t = torch.min(t_vals, dim=0)[0]
 
-    t_vals = list(filter(isSomething, t_vals))
+    assert min_t.shape == (N,)
 
-    if len(t_vals) == 0:
-        return None
+    return min_t
 
-    return min(t_vals)
-
-def distance_along_line_of_sight(obs, ry, rx, dy, dx, no_collision_val=None):
+def distance_along_line_of_sight(obs, ry_rx_dy_dx, no_collision_dist):
     """
         obs    : list of obstacles
         ry, rx : (y,x) ray origin
         dy, dx : (y,x) ray direction
     """
-    ray = (ry, rx, dy, dx)
-    
-    def intersect_shape(shape_params):
-        nonlocal ray
+    assert len(ry_rx_dy_dx.shape) == 2
+    assert ry_rx_dy_dx.shape[0] == 4
+    N = ry_rx_dy_dx.shape[1]
+
+    out = torch.ones((N,), device=the_device) * no_collision_dist
+
+    for shape_params in obs:
         ty = shape_params[0]
         rest = shape_params[1:]
         if ty == CIRCLE:
             assert len(rest) == 3
-            return intersect_circle(*ray, *rest)
+            d = intersect_circle(ry_rx_dy_dx, *rest, no_collision_dist)
         elif ty == RECTANGLE:
             assert len(rest) == 5
-            return intersect_rectangle(*ray, *rest)
+            d = intersect_rectangle(ry_rx_dy_dx, *rest, no_collision_dist)
         else:
             raise Exception("Unrecognized shape")
-    
-    isSomething = lambda x : x is not None
+        d_lt_out = d < out
+        out[d_lt_out] = d[d_lt_out]
+    return out
 
-    collisions = list(filter(isSomething, map(intersect_shape, obs)))
-
-    if len(collisions) == 0:
-        return no_collision_val
-    return min(collisions)
-
-def line_of_sight_from_bottom_up(obs, position):
-    return distance_along_line_of_sight(obs, 1.0, position, -1.0, 0.0, 1.0)
+def lines_of_sight_from_bottom_up(obs, values):
+    assert len(values.shape) == 1
+    N = values.shape[0]
+    ry_rx_dy_dx = torch.stack((
+        torch.ones(N),
+        values,
+        -torch.ones(N),
+        torch.zeros(N)
+    ), dim=0)
+    assert ry_rx_dy_dx.shape == (4, N)
+    ry_rx_dy_dx = ry_rx_dy_dx.to(the_device)
+    return distance_along_line_of_sight(obs, ry_rx_dy_dx, 1.0)
 
 def make_image_pred(example, img_size, network, num_splits, predict_variance):
     num_splits = max(num_splits, 1)
@@ -406,10 +435,8 @@ def make_heatmap_image_gt(example, img_size):
 
 def make_depthmap_gt(example, img_size):
     obs = example["obstacles_list"][0]
-    arr = torch.zeros((img_size))
-    for i, x in enumerate(np.linspace(0.0, 1.0, img_size)):
-        arr[i] = line_of_sight_from_bottom_up(obs, x)
-    return arr
+    values = torch.linspace(0.0, 1.0, img_size)
+    return lines_of_sight_from_bottom_up(obs, values)
 
 def make_depthmap_pred(example, img_size, network):
     locations = torch.linspace(0, 1, img_size).reshape(1, img_size, 1).to(the_device)
@@ -558,14 +585,7 @@ def make_implicit_outputs(obs, params, representation):
         return heatmap_batch(params.permute(1, 0), obs)
     elif representation == "depthmap":   
         assert params.shape[1] == 1
-        num = params.shape[0]
-        output = torch.zeros(num)
-        # CPU implementation for now :(
-        for i in range(num):
-            p = params[i]
-            v = line_of_sight_from_bottom_up(obs, p[0])
-            output[i] = torch.tensor(v, dtype=torch.float)
-        return output
+        return lines_of_sight_from_bottom_up(obs, params[:,0])
     else:
         raise Exception("Unrecognized representation")
 

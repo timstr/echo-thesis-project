@@ -1,3 +1,4 @@
+from featurize import make_dense_outputs
 import torch
 
 def convert_sdf_to_occupancy(sdf):
@@ -20,26 +21,26 @@ def convert_heatmap_to_occupancy(hm):
     else:
         raise Exception("Unrecognized SDF tensor shape")
 
-def convert_heatmap_to_shadowed_occupancy(heatmap):
-    num_dims = len(heatmap.shape)
+def convert_occupancy_to_shadowed_occupancy(occupancy):
+    num_dims = len(occupancy.shape)
     if num_dims == 4:
-        B, C, H, W = heatmap.shape
+        B, C, H, W = occupancy.shape
         mask_row = torch.zeros((B, 1, W))
         out = torch.zeros((B, 1, H, W))
         for i in list(range(H))[::-1]:
-            mask_row[heatmap[:,0,i,:] > 0.0] = 1.0
+            mask_row[occupancy[:,0,i,:] > 0.0] = 1.0
             out[:,0,i,:] = mask_row
         return out
     elif num_dims == 2:
-        H, W = heatmap.shape
+        H, W = occupancy.shape
         mask_row = torch.zeros((W))
         out = torch.zeros((H, W))
         for i in list(range(H))[::-1]:
-            mask_row[heatmap[i,:] > 0.0] = 1.0
+            mask_row[occupancy[i,:] > 0.0] = 1.0
             out[i] = mask_row
         return out
     else:
-        raise Exception("Unrecognized heatmap tensor shape")
+        raise Exception("Unrecognized occupancy tensor shape")
 
 def convert_depthmap_to_shadowed_occupancy(depthmap):
     num_dims = len(depthmap.shape)
@@ -60,3 +61,11 @@ def convert_depthmap_to_shadowed_occupancy(depthmap):
         return out
     else:
         raise Exception("Unrecognized depthmap tensor shape")
+
+def ground_truth_occupancy(obstacles, size):
+    sdf = make_dense_outputs(obstacles, "sdf", size)
+    return convert_sdf_to_occupancy(sdf)
+
+def ground_truth_shadowed_occupancy(obstacles, size):
+    o = ground_truth_occupancy(obstacles, size)
+    return convert_occupancy_to_shadowed_occupancy(o)

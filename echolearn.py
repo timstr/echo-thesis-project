@@ -1,6 +1,6 @@
 import fix_dead_command_line
 
-from visualization import plot_ground_truth, plot_inputs, plot_prediction
+from visualization import plot_ground_truth, plot_inputs, plot_prediction, plt_screenshot
 import os
 from loss_functions import compute_loss_on_dataset, meanAndVarianceLoss, meanSquaredErrorLoss
 from dataset_config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
@@ -12,7 +12,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import datetime
-import PIL.Image
 
 from the_device import the_device
 from device_dict import DeviceDict
@@ -24,16 +23,6 @@ from EchoLearnNN import EchoLearnNN
 from SimpleNN import SimpleNN
 
 to_tensor = torchvision.transforms.ToTensor()
-
-def plt_screenshot():
-    fig = plt.gcf()
-    pil_img = PIL.Image.frombytes(
-        'RGB',
-        fig.canvas.get_width_height(),
-        fig.canvas.tostring_rgb()
-    )
-    return pil_img
-    # return to_tensor(pil_img)
 
 def main():
     parser = ArgumentParser()
@@ -190,10 +179,10 @@ def main():
         ax_t1 = axes[0,0]
         ax_t2 = axes[0,1]
         ax_t3 = axes[0,2]
+        ax_t4 = axes[0,3]
         ax_b1 = axes[1,0]
         ax_b2 = axes[1,1]
         ax_b3 = axes[1,2]
-        ax_t4 = axes[0,3]
         ax_b4 = axes[1,3]
 
         num_epochs = 1000000
@@ -294,7 +283,7 @@ def main():
                     fig.canvas.draw()
                     fig.canvas.flush_events()
 
-                    plt_screenshot().save(log_path + "/image_" + str(global_iteration + 1) + ".png")
+                    plt_screenshot(fig).save(log_path + "/image_" + str(global_iteration + 1) + ".png")
 
                     if args.iterations is not None and global_iteration > args.iterations:
                         print("Done - desired iteration count was reached")

@@ -1,11 +1,12 @@
-from featurize import make_depthmap_gt, make_depthmap_pred, make_heatmap_image_gt, make_heatmap_image_pred, make_sdf_image_gt, make_sdf_image_pred, red_white_blue, red_white_blue_banded
 import torch
 import torchvision
+import PIL.Image
 
 from device_dict import DeviceDict
 from dataset_config import OutputConfig, ReceiverConfig
 from EchoLearnNN import EchoLearnNN
 from the_device import what_my_gpu_can_handle
+from featurize import make_depthmap_gt, make_depthmap_pred, make_heatmap_image_gt, make_heatmap_image_pred, make_sdf_image_gt, make_sdf_image_pred, red_white_blue, red_white_blue_banded
 
 def plot_inputs(plt_axis, batch, receiver_config):
     assert isinstance(batch, DeviceDict)
@@ -111,3 +112,12 @@ def plot_prediction(plt_axis, batch, network, output_config):
             plot_depthmap(plt_axis, output, output_config)
         else:
             raise Exception("Unrecognized output representation")
+
+
+def plt_screenshot(plt_figure):
+    pil_img = PIL.Image.frombytes(
+        'RGB',
+        plt_figure.canvas.get_width_height(),
+        plt_figure.canvas.tostring_rgb()
+    )
+    return pil_img
