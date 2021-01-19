@@ -14,20 +14,18 @@ class SimpleNN(nn.Module):
         self._output_resolution = output_resolution if output_resolution is not None else 1
         self._predict_variance = predict_variance
 
-        assert(False) # TODO: implement predicting variance
-
         self._param_repetitions = 1
 
-        assert(input_format in ["1D", "2D"])
+        assert input_format in ["1D", "2D"]
 
-        assert(output_format in ["scalar", "1D", "2D"])
+        assert output_format in ["scalar", "1D", "2D"]
 
-        assert((output_format == "scalar") != isinstance(output_resolution, int))
+        assert (output_format == "scalar") != isinstance(output_resolution, int)
 
-        # assert((output_format == "scalar") == (self._output_resolution == 1))
-        # assert((output_format == "scalar") == (self._num_implicit_params != 0))
+        # assert (output_format == "scalar") == (self._output_resolution == 1)
+        # assert (output_format == "scalar") == (self._num_implicit_params != 0)
 
-        assert((output_resolution is None) != isinstance(output_resolution, int))
+        assert (output_resolution is None) != isinstance(output_resolution, int)
 
         def makeFullyConnected(in_features, out_features, activation=True):
             lin = nn.Linear(
@@ -66,7 +64,7 @@ class SimpleNN(nn.Module):
 
         w = w.reshape(B, -1)
 
-        assert(w.shape == (B, self._num_inputs))
+        assert w.shape == (B, self._num_inputs)
 
         x1 = self.fc1(w)
         x2 = self.fc2(x1)
@@ -74,7 +72,7 @@ class SimpleNN(nn.Module):
 
         if self._num_implicit_params > 0:
             implicit_params = d['params']
-            assert(implicit_params.shape == (B, self._num_implicit_params))
+            assert implicit_params.shape == (B, self._num_implicit_params)
             x3 = torch.cat(
                 (x3, implicit_params),
                 dim=1
@@ -86,7 +84,7 @@ class SimpleNN(nn.Module):
 
         xfinal = x6
 
-        assert(xfinal.shape == (B, self._num_outputs))
+        assert xfinal.shape == (B, self._num_outputs)
 
         if self._output_format == "scalar":
             output = xfinal

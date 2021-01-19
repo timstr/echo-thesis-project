@@ -1,9 +1,8 @@
+import fix_dead_command_line
+
 from Echo4ChDataset import Echo4ChDataset
 from BatGNet import BatGNet
-
-import fix_dead_command_line
 import torch
-import torch.nn as nn
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from argparse import ArgumentParser

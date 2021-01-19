@@ -9,7 +9,7 @@ class Permute(nn.Module):
         self._new_dim_order = new_dim_order
 
     def forward(self, x):
-        assert(isinstance(x, torch.Tensor))
+        assert isinstance(x, torch.Tensor)
         B = x.shape[0]
         if len(x.shape[1:]) != len(self._new_dim_order):
             raise Exception(f"Reshape: expected input with {len(self._new_dim_order)} dimensions, but got {len(x.shape[1:])} dimensions instead")

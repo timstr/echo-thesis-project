@@ -1,15 +1,26 @@
 import torch
 
-def convert_sdf_to_heatmap(sdf):
+def convert_sdf_to_occupancy(sdf):
     num_dims = len(sdf.shape)
+    threshold = 0.0 # TODO: tune this (using validation set???)
     if num_dims == 4: # B, C, H, W
-        return (sdf[:,:1,:,:] <= 0.0).float()
+        return (sdf[:,:1,:,:] <= threshold).float()
     elif num_dims == 2: # B,
-        return (sdf <= 0.0).float()
+        return (sdf <= threshold).float()
     else:
         raise Exception("Unrecognized SDF tensor shape")
 
-def convert_heatmap_to_shadowed_heatmap(heatmap):
+def convert_heatmap_to_occupancy(hm):
+    num_dims = len(hm.shape)
+    threshold = 0.5 # TODO: tune this (using validation set???)
+    if num_dims == 4: # B, C, H, W
+        return (hm[:,:1,:,:] >= threshold).float()
+    elif num_dims == 2: # B,
+        return (hm >= threshold).float()
+    else:
+        raise Exception("Unrecognized SDF tensor shape")
+
+def convert_heatmap_to_shadowed_occupancy(heatmap):
     num_dims = len(heatmap.shape)
     if num_dims == 4:
         B, C, H, W = heatmap.shape
@@ -30,7 +41,7 @@ def convert_heatmap_to_shadowed_heatmap(heatmap):
     else:
         raise Exception("Unrecognized heatmap tensor shape")
 
-def convert_depthmap_to_shadowed_heatmap(depthmap):
+def convert_depthmap_to_shadowed_occupancy(depthmap):
     num_dims = len(depthmap.shape)
     if num_dims == 3:
         B, C, W = depthmap.shape

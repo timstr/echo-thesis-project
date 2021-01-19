@@ -29,7 +29,7 @@ wavesim_receiver_locations = [
 
 
 def make_emitter_indices(arrangement):
-    assert(arrangement in ["mono", "stereo", "surround"])
+    assert arrangement in ["mono", "stereo", "surround"]
     if arrangement == "mono":
         return [2]
     elif arrangement == "stereo":
@@ -40,27 +40,27 @@ def make_emitter_indices(arrangement):
         raise Exception("Unrecognized emitter layout")
 
 def make_receiver_indices(num_receivers, arrangement):
-    assert(num_receivers in [1, 2, 4, 8])
-    assert(arrangement in ["flat", "grid"])
+    assert num_receivers in [1, 2, 4, 8]
+    assert arrangement in ["flat", "grid"]
 
     # if flat arrangement, then at most 4 receivers
-    assert(arrangement != "flat" or num_receivers <= 4)
+    assert arrangement != "flat" or num_receivers <= 4
 
     # if grid arrangement, then at least 4 receivers
-    assert(arrangement != "grid" or num_receivers >= 4)
+    assert arrangement != "grid" or num_receivers >= 4
 
     if num_receivers == 1:
-        assert(arrangement == "flat")
+        assert arrangement == "flat"
         return [1]
     elif num_receivers == 2:
-        assert(arrangement == "flat")
+        assert arrangement == "flat"
         return [1, 2]
     elif num_receivers == 4 and arrangement == "flat":
         return [0, 1, 2, 3]
     elif num_receivers == 4 and arrangement == "grid":
         return [1, 2, 5, 6]
     elif num_receivers == 8:
-        assert(arrangement == "grid")
+        assert arrangement == "grid"
         return [0, 1, 2, 3, 4, 5, 6, 7]
     else:
         raise Exception("Unrecognized receiver layout")
@@ -161,15 +161,11 @@ class OutputConfig:
         assert isinstance(predict_variance, bool)
         assert resolution in [32, 64, 128, 256, 512, 1024]
         self.format = format
-        self.dims = 0 if implicit else (
-            1 if format == "depthmap" else 2
-        )
+        self.dims = 1 if format == "depthmap" else 2
         self.num_channels = 2 if predict_variance else 1
         self.implicit = implicit
         self.dense = not implicit
-        self.num_implicit_params = 0 if not implicit else (
-            1 if format == "depthmap" else 2
-        )
+        self.num_implicit_params = 0 if not implicit else self.dims
         self.predict_variance = predict_variance
         self.resolution = resolution
 

@@ -145,7 +145,7 @@ class EchoLearnNN(nn.Module):
         if self._output_config.implicit:
             self.final = makeFullyConnected(512, channels_out, activation=False)
         elif dims_out == 1:
-            assert(self._output_config.resolution >= 16)
+            assert self._output_config.resolution >= 16
             convsFlex = ()
             output_size = 16
             while output_size < self._output_config.resolution:
@@ -161,7 +161,7 @@ class EchoLearnNN(nn.Module):
                 makeConvSame(32, channels_out, kernel_size=1, dims=1, activation=False),
             )
         elif dims_out == 2:
-            assert(self._output_config.resolution >= 8)
+            assert self._output_config.resolution >= 8
             convsFlex = ()
             output_size = 16
             while output_size < self._output_config.resolution:
@@ -188,7 +188,7 @@ class EchoLearnNN(nn.Module):
 
         wx = self.convIn(w0)
 
-        assert(len(wx.shape) == 3)
+        assert len(wx.shape) == 3
 
         F = wx.shape[1]
         N = wx.shape[2]
@@ -197,19 +197,19 @@ class EchoLearnNN(nn.Module):
             ls = torch.linspace(0.0, 1.0, N).unsqueeze(0).unsqueeze(0).to(wx.device)
 
             mom1 = torch.sum(wx * ls, dim=2)
-            assert(mom1.shape == (B, F))
+            assert mom1.shape == (B, F)
 
             mom2 = torch.sum((wx * (ls - mom1.unsqueeze(-1)))**2, dim=2)
-            assert(mom2.shape == (B, F))
+            assert mom2.shape == (B, F)
 
             mean = torch.mean(wx, dim=2)
-            assert(mean.shape == (B, F))
+            assert mean.shape == (B, F)
 
             variance = torch.var(wx, dim=2)
-            assert(variance.shape == (B, F))
+            assert variance.shape == (B, F)
 
             summary_stats = torch.stack((mom1, mom2, mean, variance), dim=2)
-            assert(summary_stats.shape == (B, F, 4))
+            assert summary_stats.shape == (B, F, 4)
 
             fc_input = summary_stats.reshape(B, F * 4)
         else:
@@ -223,11 +223,11 @@ class EchoLearnNN(nn.Module):
         if self._output_config.implicit:
             implicit_params = d['params']
             
-            assert(len(implicit_params.shape) == 3)
+            assert len(implicit_params.shape) == 3
 
             param_batch_size = implicit_params.shape[1]
 
-            assert(implicit_params.shape == (B, param_batch_size, num_params))
+            assert implicit_params.shape == (B, param_batch_size, num_params)
 
             summary_stats_flat = fc_input.repeat_interleave(param_batch_size, dim=0)
 
@@ -242,7 +242,7 @@ class EchoLearnNN(nn.Module):
             outputs_flat = self.final(v0)
             output = outputs_flat.reshape(B, param_batch_size, out_channels)
             output = output.permute(0, 2, 1)
-            assert(output.shape == (B, out_channels, param_batch_size))
+            assert output.shape == (B, out_channels, param_batch_size)
         else:
             v0 = fc_input
             v1 = self.fullyConnected(v0)
@@ -252,7 +252,16 @@ class EchoLearnNN(nn.Module):
         if (self._output_config.predict_variance):
             output = torch.cat((
                 output[:, 0:1],
-                torch.exp(output[:, 1:2]),
+                torch.exp(torch.clamp(output[:, 1:2], min=-4.0, max=2.0)),
             ), dim=1)
 
         return DeviceDict({'output': output})
+
+    def save(self, filename):
+        print(f"Saving model to \"{filename}\"")
+        torch.save(self.state_dict(), filename)
+
+    def restore(self, filename):
+        print("Restoring model from \"{}\"".format(filename))
+        self.load_state_dict(torch.load(filename))
+        self.eval()

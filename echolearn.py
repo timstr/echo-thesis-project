@@ -1,6 +1,8 @@
-import os
 import fix_dead_command_line
 
+from visualization import plot_ground_truth, plot_inputs, plot_prediction
+import os
+from loss_functions import compute_loss_on_dataset, meanAndVarianceLoss, meanSquaredErrorLoss
 from dataset_config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
 import torch
 import torchvision
@@ -8,7 +10,6 @@ from torch.utils.tensorboard import SummaryWriter
 from argparse import ArgumentParser
 import matplotlib
 import matplotlib.pyplot as plt
-import math
 import numpy as np
 import datetime
 import PIL.Image
@@ -17,7 +18,6 @@ from the_device import the_device
 from device_dict import DeviceDict
 from dataset import WaveSimDataset
 from progress_bar import progress_bar
-from featurize import make_sdf_image_gt, make_sdf_image_pred, make_heatmap_image_gt, make_heatmap_image_pred, make_depthmap_gt, make_depthmap_pred, make_deterministic_validation_batches_implicit, red_white_blue_banded, red_white_blue
 from custom_collate_fn import custom_collate
 
 from EchoLearnNN import EchoLearnNN
@@ -103,8 +103,6 @@ def main():
         samples_per_example=args.samplesperexample
     )
 
-    what_my_gpu_can_handle = 128**2
-
     if (args.nosave):
         print("NOTE: networks are not being saved")
 
@@ -146,74 +144,10 @@ def main():
         collate_fn=collate_fn_device
     )
 
-    def bogStandardLoss(batch_gt, batch_pred):
-        x1 = batch_gt["output"]
-        x2 = batch_pred["output"][:, 0]
-        mse = torch.nn.functional.mse_loss(x1, x2)
-        terms = { "mean_squared_error": mse }
-        return mse, terms
+    loss_function = meanAndVarianceLoss if output_config.predict_variance else meanSquaredErrorLoss
 
-    def meanVarianceLoss(batch_gt, batch_pred):
-        y = batch_gt["output"]
-        z_hat = batch_pred["output"]
-        y_hat = z_hat[:, 0]
-        sigma_hat_inverse = z_hat[:, 1]
-
-        sqrt2pi = math.sqrt(2.0 * np.pi)
-        squared_error = (y - y_hat)**2
-
-        #     phi(y|x)  = exp(-(y - y_hat)^2/(2*sigma^2))
-        #                     / (sqrt(2*pi)*sigma)
-        # log(phi(y|x)) = -(y - y_hat)^2 / (2*sigma^2)
-        #                     - log(sqrt(2*pi)*sigma)
-        #               = -0.5 * (y - y_hat)^2 / sigma^2
-        #                     - (log(sqrt(2*pi)) + log(sigma))
-        #               = -0.5 * (y - y_hat)^2 * (1/sigma)^2
-        #                     - (log(sqrt(2*pi)) - log(1/sigma))
-
-
-        log_numerator = -0.5 * squared_error * sigma_hat_inverse**2
-        sigma_hat_inverse_clamped = torch.clamp(sigma_hat_inverse, min=1e-6)
-        log_denominator = math.log(sqrt2pi) - torch.log(sigma_hat_inverse_clamped)
-        log_phi = log_numerator - log_denominator
-        nll = torch.mean(-log_phi)
-        terms = {
-            "mean_squared_error": torch.mean(squared_error).detach(),
-            "mean_predicted_variance": torch.mean(1.0/sigma_hat_inverse).detach(),
-            "negative_log_likelihood": nll.detach()
-        }
-        return nll, terms
-
-
-    
-    loss_function = meanVarianceLoss if args.predictvariance else bogStandardLoss
-    
-    def validation_loss(model):
-        print("Computing validation loss (MSE)...")
-        losses = []
-        for i, batch in enumerate(val_loader):
-            if args.implicitfunction:
-                num_splits = args.resolution**2 * args.batchsize // what_my_gpu_can_handle
-                batches = make_deterministic_validation_batches_implicit(batch, args.nnoutput, args.resolution, num_splits)
-                
-                losses_batch = []
-                for b in batches:
-                    b = b.to(the_device)
-                    pred = model(b)
-                    pred = pred["output"][:, 0]
-                    gt = b["output"]
-                    loss = torch.nn.functional.mse_loss(pred, gt).detach()
-                    losses_batch.append(loss.item())
-                losses.append(np.mean(np.asarray(losses_batch)))
-            else:
-                batch = batch.to(the_device)
-                pred = model(batch)
-                pred = pred["output"][:, 0]
-                gt = batch["output"]
-                loss = torch.nn.functional.mse_loss(pred, gt).detach()
-                losses.append(loss.item())
-            progress_bar(i, len(val_loader))
-        return np.mean(np.asarray(losses))
+    def validation_loss(the_network):
+        return compute_loss_on_dataset(the_network, val_loader, meanSquaredErrorLoss, args.batchsize)
 
     NetworkType = SimpleNN if args.simplenn else EchoLearnNN
 
@@ -225,115 +159,14 @@ def main():
     model_path = os.environ.get("TRAINING_MODEL_PATH")
 
     if model_path is None or not os.path.exists(model_path):
-        raise Exception("Please set the TRAINING_MODEL_PATH environment variable to point to the desired model directory")
+        raise Exception("Please set the TRAINING_MODEL_PATH environment variable to point to the desired model directory")     
 
-    def save_network(filename):
-        path = os.path.join(model_path, filename)
-        print(f"Saving model to \"{path}\"")
-        torch.save(network.state_dict(), path)
+    def make_model_filename(label):
+        assert isinstance(label, str)
+        fname = f"{args.experiment}_{timestamp}_{label}.dat"
+        return os.path.join(model_path, fname)
 
-    # def restore_network(filename):
-    #     filename = "models/" + filename
-    #     print("Loading model from \"{}\"".format(filename))
-    #     network.load_state_dict(torch.load(filename))
-    #     network.eval()
-
-    def plot_inputs(plt_axis, batch):
-        the_input = batch['input'][0].detach()
-        if (len(the_input.shape) == 2):
-            plt_axis.set_ylim(-1, 1)
-            for j in range(args.receivercount):
-                plt_axis.plot(the_input[j].detach())
-        else:
-            the_input_min = torch.min(the_input)
-            the_input_max = torch.max(the_input)
-            the_input = (the_input - the_input_min) / (the_input_max - the_input_min)
-            spectrogram_img_grid = torchvision.utils.make_grid(
-                the_input.unsqueeze(1).repeat(1, 3, 1, 1),
-                nrow=1
-            )
-            plt_axis.imshow(spectrogram_img_grid.permute(1, 2, 0))
-            plt_axis.axis("off")
-
-    def plot_ground_truth(plt_axis, batch, show_samples=False):
-        if args.nnoutput == "sdf":
-            img = make_sdf_image_gt(batch, args.resolution).cpu()
-            plt_axis.imshow(red_white_blue_banded(img), interpolation="bicubic")
-            plt_axis.axis("off")
-            if show_samples and args.implicitfunction:
-                yx = batch["params"][0].detach() * args.resolution
-                plt_axis.scatter(yx[:,1], yx[:,0], s=1.0)
-        elif args.nnoutput == "heatmap":
-            img = make_heatmap_image_gt(batch, args.resolution).cpu()
-            plt_axis.imshow(red_white_blue(img), interpolation="bicubic")
-            plt_axis.axis("off")
-            if show_samples and args.implicitfunction:
-                yx = batch["params"][0].detach() * args.resolution
-                plt_axis.scatter(yx[:,1], yx[:,0], s=1.0)
-        elif args.nnoutput == "depthmap":
-            arr = make_depthmap_gt(batch, args.resolution).cpu()
-            plt_axis.set_ylim(-0.5, 1.5)
-            plt_axis.plot(arr)
-            # TODO: show samples somehow (maybe by dots along gt arr)
-        else:
-            raise Exception("Unrecognized output representation")
-
-    def plot_image(plt_axis, img, display_fn):
-        y = img[0]
-        assert(y.shape == (args.resolution, args.resolution))
-        plt_axis.imshow(display_fn(y), interpolation="bicubic")
-        if (args.predictvariance):
-            sigma = 1.0 / img[1]
-            assert(sigma.shape == (args.resolution, args.resolution))
-            sigma_clamped = torch.clamp(sigma, 0.0, 1.0)
-            gamma_value = 0.5
-            sigma_curved = sigma_clamped**gamma_value
-            mask = torch.cat((
-                torch.zeros((args.resolution, args.resolution, 3)),
-                sigma_curved.unsqueeze(-1),
-            ), dim=2)
-            plt_axis.imshow(mask, interpolation="bicubic")
-        plt_axis.axis("off")
-
-    def plot_depthmap(plt_axis, data):
-        y = data[0]
-        assert(y.shape == (args.resolution,))
-        plt_axis.set_ylim(-0.5, 1.5)
-        plt_axis.plot(y, c="black")
-        if (args.predictvariance):
-            sigma = 1.0 / data[1]
-            assert(sigma.shape == (args.resolution,))
-            plt_axis.plot(y - sigma, c="red")
-            plt_axis.plot(y + sigma, c="red")
-
-    def plot_prediction(plt_axis, batch, network):
-        if args.implicitfunction:
-            if args.nnoutput == "sdf":
-                num_splits = args.resolution**2 // what_my_gpu_can_handle
-                img = make_sdf_image_pred(batch, args.resolution, network, num_splits, args.predictvariance)
-                plot_image(plt_axis, img, red_white_blue_banded)
-            elif args.nnoutput == "heatmap":
-                num_splits = args.resolution**2 // what_my_gpu_can_handle
-                img = make_heatmap_image_pred(batch, args.resolution, network, num_splits, args.predictvariance)
-                plot_image(plt_axis, img, red_white_blue)
-            elif args.nnoutput == "depthmap":
-                arr = make_depthmap_pred(batch, args.resolution, network)
-                plot_depthmap(plt_axis, arr)
-            else:
-                raise Exception("Unrecognized output representation")
-        else:
-            # non-implicit function
-            output = network(batch)['output'][0].detach().cpu()
-            if args.nnoutput == "sdf":
-                plot_image(plt_axis, output, red_white_blue_banded)
-            elif args.nnoutput == "heatmap":
-                plot_image(plt_axis, output, red_white_blue)
-            elif args.nnoutput == "depthmap":
-                plot_depthmap(plt_axis, output)
-            else:
-                raise Exception("Unrecognized output representation")
-
-    optimizer = torch.optim.Adam(network.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(network.parameters(), lr=0.005)
 
     timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
 
@@ -391,14 +224,15 @@ def main():
                 progress_bar((global_iteration) % args.plotinterval, args.plotinterval)
 
                 if ((global_iteration + 1) % args.validationinterval) == 0:
+                    print("Computing validation loss...")
                     curr_val_loss = validation_loss(network)
                     if curr_val_loss < best_val_loss:
                         best_val_loss = curr_val_loss
                         if not args.nosave:
-                            save_network("{}_{}_model_best.dat".format(args.experiment, timestamp))
+                            network.save(make_model_filename("best"))
                             
                     if not args.nosave:
-                        save_network("{}_{}_model_latest.dat".format(args.experiment, timestamp))
+                        network.save(make_model_filename("latest"))
 
 
                     val_loss_x.append(len(losses))
@@ -429,21 +263,21 @@ def main():
                         
                     # plot the input waveforms
                     ax_t1.title.set_text("Input (train)")
-                    plot_inputs(ax_t1, batch_cpu)
+                    plot_inputs(ax_t1, batch_cpu, receiver_config)
                     ax_b1.title.set_text("Input (validation)")
-                    plot_inputs(ax_b1, val_batch_cpu)
+                    plot_inputs(ax_b1, val_batch_cpu, receiver_config)
                     
                     # plot the ground truth obstacles
                     ax_t2.title.set_text("Ground Truth (train)")
-                    plot_ground_truth(ax_t2, batch_cpu, show_samples=False)
+                    plot_ground_truth(ax_t2, batch_cpu, output_config, show_samples=False)
                     ax_b2.title.set_text("Ground Truth (validation)")
-                    plot_ground_truth(ax_b2, val_batch_cpu)
+                    plot_ground_truth(ax_b2, val_batch_cpu, output_config)
                     
                     # plot the predicted sdf
                     ax_t3.title.set_text("Prediction (train)")
-                    plot_prediction(ax_t3, batch_gpu, network)
+                    plot_prediction(ax_t3, batch_gpu, network, output_config)
                     ax_b3.title.set_text("Prediction (validation)")
-                    plot_prediction(ax_b3, val_batch_gpu, network)
+                    plot_prediction(ax_b3, val_batch_gpu, network, output_config)
                     
                     # plot the training loss on a log plot
                     ax_t4.title.set_text("Training Loss")

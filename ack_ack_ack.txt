@@ -1,0 +1,46 @@
+qsub train_input_repr_audioraw_without_summary_stats.sh
+qsub train_input_repr_audioraw_with_summary_stats.sh
+qsub train_input_repr_audiowaveshaped_without_summary_stats.sh
+qsub train_input_repr_audiowaveshaped_with_summary_stats.sh
+qsub train_input_repr_spectrogram_without_summary_stats.sh
+qsub train_input_repr_spectrogram_with_summary_stats.sh
+
+qsub train_output_repr_depthmap_dense_novariance.sh
+qsub train_output_repr_depthmap_dense_variance.sh
+qsub train_output_repr_depthmap_implicit_novariance.sh
+qsub train_output_repr_depthmap_implicit_variance.sh
+qsub train_output_repr_heatmap_dense_novariance.sh
+qsub train_output_repr_heatmap_dense_variance.sh
+qsub train_output_repr_heatmap_implicit_novariance.sh
+qsub train_output_repr_heatmap_implicit_variance.sh
+qsub train_output_repr_sdf_dense_novariance.sh
+qsub train_output_repr_sdf_dense_variance.sh
+qsub train_output_repr_sdf_implicit_novariance.sh
+qsub train_output_repr_sdf_implicit_variance.sh
+
+qsub make_dataset_normal_1_of_8_offset_10000.sh
+qsub make_dataset_normal_2_of_8_offset_10000.sh
+qsub make_dataset_normal_3_of_8_offset_10000.sh
+qsub make_dataset_normal_4_of_8_offset_10000.sh
+qsub make_dataset_normal_5_of_8_offset_10000.sh
+qsub make_dataset_normal_6_of_8_offset_10000.sh
+qsub make_dataset_normal_7_of_8_offset_10000.sh
+qsub make_dataset_normal_8_of_8_offset_10000.sh
+
+qdel 1763040
+qdel 1763041
+qdel 1763042
+qdel 1763043
+qdel 1763044
+qdel 1763045
+
+
+
+set WAVESIM_DATASET=D:\ultrasonic\datasets\v9
+
+set WAVESIM_DATASET=D:\ultrasonic\datasets\v9_test_set
+
+set WAVESIM_DATASET=D:\ultrasonic\datasets\v9_widening_rectangle
+
+set WAVESIM_DATASET=D:\ultrasonic\datasets\v9_orbiting_circle
+

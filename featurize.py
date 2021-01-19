@@ -60,7 +60,7 @@ def cutout_circle(barrier, y, x, rad):
     barrier[mask] = 0.0
 
 def cutout_rectangle(barrier, y, x, height, width):
-    assert(len(barrier.shape) == 2)
+    assert len(barrier.shape) == 2
     h, w = barrier.shape
     y0 = int(h * (y - height/2))
     y1 = int(h * (y + height/2))
@@ -91,15 +91,15 @@ def cutout_square(barrier, y, x, size, angle):
     barrier[mask] = 0.0
 
 def sdf_batch_circle(coordinates_yx_batch, circle_y, circle_x, circle_r):
-    assert(len(coordinates_yx_batch.shape) == 2)
-    assert(coordinates_yx_batch.shape[0] == 2)
+    assert len(coordinates_yx_batch.shape) == 2
+    assert coordinates_yx_batch.shape[0] == 2
     dev = coordinates_yx_batch.device
     circle_yx = torch.tensor([circle_y, circle_x], dtype=torch.float).unsqueeze(-1).to(dev)
     return torch.sqrt(torch.sum((coordinates_yx_batch - circle_yx)**2, dim=0)) - circle_r
 
 def sdf_batch_rectangle(coordinates_yx_batch, rect_y, rect_x, rect_h, rect_w, rect_angle):
-    assert(len(coordinates_yx_batch.shape) == 2)
-    assert(coordinates_yx_batch.shape[0] == 2)
+    assert len(coordinates_yx_batch.shape) == 2
+    assert coordinates_yx_batch.shape[0] == 2
     dev = coordinates_yx_batch.device
     rect_yx = torch.tensor([rect_y, rect_x], dtype=torch.float).unsqueeze(-1).to(dev)
 
@@ -130,7 +130,7 @@ def sdf_batch_one_shape(coordinates_yx_batch, shape_tuple):
         raise Exception("Unknown shape type")
 
 def sdf_batch(coordinates_yx_batch, obs):
-    assert(len(obs) > 0)
+    assert len(obs) > 0
     vals = sdf_batch_one_shape(coordinates_yx_batch, obs[0])
     for o in obs[1:]:
         vals = torch.min(
@@ -143,8 +143,8 @@ def sdf_batch(coordinates_yx_batch, obs):
     return vals
 
 def heatmap_batch_circle(coordinates_yx_batch, circle_y, circle_x, circle_r):
-    assert(len(coordinates_yx_batch.shape) == 2)
-    assert(coordinates_yx_batch.shape[0] == 2)
+    assert len(coordinates_yx_batch.shape) == 2
+    assert coordinates_yx_batch.shape[0] == 2
     dev = coordinates_yx_batch.device
     circle_yx = torch.tensor([circle_y, circle_x], dtype=torch.float).unsqueeze(-1).to(dev)
     dists = torch.sum((coordinates_yx_batch - circle_yx)**2, dim=0)
@@ -153,8 +153,8 @@ def heatmap_batch_circle(coordinates_yx_batch, circle_y, circle_x, circle_r):
     return ret
 
 def heatmap_batch_rectangle(coordinates_yx_batch, rect_y, rect_x, rect_h, rect_w, rect_angle):
-    assert(len(coordinates_yx_batch.shape) == 2)
-    assert(coordinates_yx_batch.shape[0] == 2)
+    assert len(coordinates_yx_batch.shape) == 2
+    assert coordinates_yx_batch.shape[0] == 2
     dev = coordinates_yx_batch.device
     rect_yx = torch.tensor([rect_y, rect_x], dtype=torch.float).unsqueeze(-1).to(dev)
     disps = coordinates_yx_batch - rect_yx
@@ -185,7 +185,7 @@ def heatmap_batch_one_shape(coordinates_yx_batch, shape_tuple):
         raise Exception("Unknown shape type")
 
 def heatmap_batch(coordinates_yx_batch, obs):
-    assert(len(obs) > 0)
+    assert len(obs) > 0
     vals = heatmap_batch_one_shape(coordinates_yx_batch, obs[0])
     for o in obs[1:]:
         vals = torch.max(
@@ -312,10 +312,10 @@ def distance_along_line_of_sight(obs, ry, rx, dy, dx, no_collision_val=None):
         ty = shape_params[0]
         rest = shape_params[1:]
         if ty == CIRCLE:
-            assert(len(rest) == 3)
+            assert len(rest) == 3
             return intersect_circle(*ray, *rest)
         elif ty == RECTANGLE:
-            assert(len(rest) == 5)
+            assert len(rest) == 5
             return intersect_rectangle(*ray, *rest)
         else:
             raise Exception("Unrecognized shape")
@@ -335,7 +335,7 @@ def make_image_pred(example, img_size, network, num_splits, predict_variance):
     num_splits = max(num_splits, 1)
     num_dims = 2 if predict_variance else 1
     outputs = torch.zeros(num_dims, img_size**2)
-    assert(img_size**2 % num_splits) == 0
+    assert (img_size**2 % num_splits) == 0
     split_size = img_size**2 // num_splits
     xy_locations = all_yx_locations(img_size).permute(1, 0).unsqueeze(0)
     d = DeviceDict({
@@ -347,7 +347,7 @@ def make_image_pred(example, img_size, network, num_splits, predict_variance):
         end = (i + 1) * split_size
         d["params"] = xy_locations[:, begin:end]
         pred = network(d)["output"]
-        assert(pred.shape == (1, num_dims, split_size))
+        assert pred.shape == (1, num_dims, split_size)
         outputs[:, begin:end] = pred.reshape(num_dims, split_size).detach()
         pred = None
     return outputs.reshape(num_dims, img_size, img_size).detach().cpu()
@@ -363,7 +363,7 @@ def make_sdf_image_gt(example, img_size):
     return sdf_batch(coordinates_yx, obs).reshape(img_size, img_size)
 
 def red_white_blue_banded(img):
-    assert(len(img.shape) == 2)
+    assert len(img.shape) == 2
     img = img * 5.0
     r = torch.clamp(img + 1.0, min=0.0, max=1.0)
     g = torch.clamp(1.0 - torch.abs(img), min=0.0, max=1.0)
@@ -380,7 +380,7 @@ def red_white_blue_banded(img):
     return rgb
 
 def red_white_blue(img):
-    assert(len(img.shape) == 2)
+    assert len(img.shape) == 2
     img = img.unsqueeze(-1)
     close_to_one  = torch.clamp((2.0 * img - 1.0), 0.0, 1.0)
     close_to_half = torch.clamp((1.0 - 2.0 * torch.abs(img - 0.5)), 0.0, 1.0)
@@ -418,10 +418,10 @@ def make_depthmap_pred(example, img_size, network):
         "params": locations
     })
     pred = network(d)["output"]
-    assert(len(pred.shape) == 3)
-    assert(pred.shape[0] == 1)
+    assert len(pred.shape) == 3
+    assert pred.shape[0] == 1
     outputDims = pred.shape[1]
-    assert(pred.shape[2] == img_size)
+    assert pred.shape[2] == img_size
     return pred.reshape(outputDims, img_size).detach().cpu()
 
 def obstacle_radius(o):
@@ -549,15 +549,15 @@ def make_implicit_params_validation(img_size, representation):
     ).to(the_device).reshape(1, img_size**2, 2)
 
 def make_implicit_outputs(obs, params, representation):
-    assert(len(params.shape) == 2)
+    assert len(params.shape) == 2
     if representation == "sdf":            
-        assert(params.shape[1] == 2)
+        assert params.shape[1] == 2
         return sdf_batch(params.permute(1, 0), obs)
     elif representation == "heatmap":
-        assert(params.shape[1] == 2)
+        assert params.shape[1] == 2
         return heatmap_batch(params.permute(1, 0), obs)
     elif representation == "depthmap":   
-        assert(params.shape[1] == 1) 
+        assert params.shape[1] == 1
         num = params.shape[0]
         output = torch.zeros(num)
         # CPU implementation for now :(
@@ -573,14 +573,14 @@ def make_dense_outputs(obs, representation, img_size):
     theDict = DeviceDict({ "obstacles_list": [obs]})
     if representation == "sdf":
         output = make_sdf_image_gt(theDict, img_size)
-        assert(output.shape == (img_size, img_size))
+        assert output.shape == (img_size, img_size)
     elif representation == "heatmap":
         output = make_heatmap_image_gt(theDict, img_size)
-        assert(output.shape == (img_size, img_size))
+        assert output.shape == (img_size, img_size)
     elif representation == "depthmap":
         output = make_depthmap_gt(theDict, img_size)
-        assert(len(output.shape) == 1)
-        assert(output.shape[0] == img_size)
+        assert len(output.shape) == 1
+        assert output.shape[0] == img_size
     else:
         raise Exception("Unown representation")
     return output
@@ -591,7 +591,7 @@ def make_deterministic_validation_batches_implicit(example, representation, img_
     obsobs = example["obstacles_list"]
 
     data_size = img_size if (representation == "depthmap") else img_size**2
-    assert(data_size % num_splits == 0)
+    assert data_size % num_splits == 0
     split_size = data_size // num_splits
 
     batches = []
