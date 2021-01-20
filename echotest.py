@@ -14,6 +14,7 @@ from EchoLearnNN import EchoLearnNN
 from the_device import the_device
 from progress_bar import progress_bar
 from visualization import plot_ground_truth, plot_prediction, plt_screenshot
+from realbool import realbool
 
 def main():
     parser = ArgumentParser()
@@ -26,14 +27,14 @@ def main():
     parser.add_argument("--receiverarrangement", type=str, choices=["flat", "grid"], dest="receiverarrangement", required=True)
     parser.add_argument("--emitterarrangement", type=str, choices=["mono", "stereo", "surround"], dest="emitterarrangement", required=True)
     parser.add_argument("--emittersignal", type=str, choices=["impulse", "beep", "sweep"], dest="emittersignal", required=True)
-    parser.add_argument("--emittersequential", type=bool, dest="emittersequential", required=True)
-    parser.add_argument("--emittersamefrequency", type=bool, dest="emittersamefrequency", required=True)
-    parser.add_argument("--implicitfunction", type=bool, dest="implicitfunction", required=True)
-    parser.add_argument("--predictvariance", type=bool, dest="predictvariance", required=True)
+    parser.add_argument("--emittersequential", type=realbool, dest="emittersequential", required=True)
+    parser.add_argument("--emittersamefrequency", type=realbool, dest="emittersamefrequency", required=True)
+    parser.add_argument("--implicitfunction", type=realbool, dest="implicitfunction", required=True)
+    parser.add_argument("--predictvariance", type=realbool, dest="predictvariance", required=True)
     parser.add_argument("--resolution", type=int, dest="resolution", required=True)
     parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram"], required=True)
     parser.add_argument("--nnoutput", type=str, dest="nnoutput", choices=["sdf", "heatmap", "depthmap"], required=True)
-    parser.add_argument("--summarystatistics", type=bool, dest="summarystatistics", required=True)
+    parser.add_argument("--summarystatistics", type=realbool, dest="summarystatistics", required=True)
 
     parser.add_argument("--modelpath", type=str, dest="modelpath", required=True)
 
@@ -91,6 +92,15 @@ def main():
         samples_per_example=128
     )
 
+    print("============== CONFIGURATIONS ==============")
+    emitter_config.print()
+    receiver_config.print()
+    input_config.print()
+    output_config.print()
+    # training_config.print()
+    print("============================================")
+    print("")
+
     ecds = WaveSimDataset(
         training_config,
         input_config,
@@ -110,6 +120,9 @@ def main():
         collate_fn=collate_fn_device
     )
 
+    # TODO: add options for computing quantitative results and save to numpy array and pickle file (dict of labelled arrays?)
+    # TODO: add options to visualize just a single example
+    
     network = EchoLearnNN(input_config, output_config)
     network.restore(args.modelpath)
     network = network.to(the_device)

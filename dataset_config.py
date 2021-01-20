@@ -2,7 +2,6 @@ from featurize import CIRCLE
 from featurize_audio import make_spectrogram, sclog
 import math
 import numpy as np
-from scipy.signal.spectral import spectrogram
 import torch
 
 wavesim_field_size = 512
@@ -111,6 +110,13 @@ class EmitterConfig:
             delay=(i * sequential_delay if self.sequential else 0),
             format=self.format
         ) for i in range(len(self.indices))]
+    
+    def print(self):
+        print(f"Emitter Configuration:")
+        print(f"  arrangement            : {self.arrangement}")
+        print(f"  format                 : {self.format}")
+        print(f"  sequential?            : {self.sequential}")
+        print(f"  same frequency?        : {self.sequential}")
 
 class ReceiverConfig:
     def __init__(self, arrangement="grid", count=8):
@@ -124,6 +130,11 @@ class ReceiverConfig:
         self.arrangement = arrangement
         self.count = count
         self.indices = make_receiver_indices(self.count, self.arrangement)
+
+    def print(self):
+        print(f"Receiver Configuration:")
+        print(f"  arrangement            : {self.arrangement}")
+        print(f"  count                  : {self.count}")
 
 
 def combine_emitted_signals(impulse_responses, emitter_config, receiver_config):
@@ -150,9 +161,17 @@ class InputConfig:
         assert format in ["audioraw", "audiowaveshaped", "spectrogram"]
         assert isinstance(receiver_config, ReceiverConfig)
         self.format = format
-        self.dims = 2 if (self.format == "spectrogram") else 1
         self.num_channels = receiver_config.count # TODO: change this in case of GCC-PHAT
         self.summary_statistics = summary_statistics
+
+        self.dims = 2 if (self.format == "spectrogram") else 1
+
+    def print(self):
+        print(f"Input Configuration:")
+        print(f"  format                 : {self.format}")
+        print(f"  summary statistics?    : {self.summary_statistics}")
+        print(f"  -> channels            : {self.num_channels}")
+        print(f"  -> dimensions          : {self.dims}")
 
 class OutputConfig:
     def __init__(self, format="sdf", implicit=True, predict_variance=True, resolution=1024):
@@ -161,13 +180,23 @@ class OutputConfig:
         assert isinstance(predict_variance, bool)
         assert resolution in [32, 64, 128, 256, 512, 1024]
         self.format = format
-        self.dims = 1 if format == "depthmap" else 2
-        self.num_channels = 2 if predict_variance else 1
         self.implicit = implicit
-        self.dense = not implicit
-        self.num_implicit_params = 0 if not implicit else self.dims
         self.predict_variance = predict_variance
         self.resolution = resolution
+
+        self.dims = 1 if format == "depthmap" else 2
+        self.num_implicit_params = 0 if not implicit else self.dims
+        self.num_channels = 2 if predict_variance else 1
+    
+    def print(self):
+        print(f"Output Configuration:")
+        print(f"  format                 : {self.format}")
+        print(f"  implicit function?     : {self.implicit}")
+        print(f"  predict variance?      : {self.predict_variance}")
+        print(f"  resolution             : {self.resolution}")
+        print(f"  -> dimensions          : {self.dims}")
+        print(f"  -> implicit parameters : {self.num_implicit_params}")
+        print(f"  -> channels            : {self.num_channels}")
 
 def transform_received_signals(received_signals, input_config):
     assert isinstance(input_config, InputConfig)
@@ -202,6 +231,17 @@ class TrainingConfig:
         self.allow_occlusions = allow_occlusions
         self.importance_sampling = importance_sampling
         self.samples_per_example = samples_per_example
+
+    def print(self):
+        def someOrAll(n):
+            return "no limit" if n is None else str(n)
+        print(f"Training Configuration:")
+        print(f"  maximum examples       : {someOrAll(self.max_examples)}")
+        print(f"  maximum obstacles      : {someOrAll(self.max_obstacles)}")
+        print(f"  circles only?          : {self.circles_only}")
+        print(f"  allow occlusions?      : {self.allow_occlusions}")
+        print(f"  importance sampling?   : {self.importance_sampling}")
+        print(f"  samples per example    : {self.samples_per_example}")
 
 def example_should_be_used(obstacles, occlusion, training_config):
     assert isinstance(obstacles, list)

@@ -92,6 +92,15 @@ def main():
         samples_per_example=args.samplesperexample
     )
 
+    print("============== CONFIGURATIONS ==============")
+    emitter_config.print()
+    receiver_config.print()
+    input_config.print()
+    output_config.print()
+    training_config.print()
+    print("============================================")
+    print("")
+
     if (args.nosave):
         print("NOTE: networks are not being saved")
 

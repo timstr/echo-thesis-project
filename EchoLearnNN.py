@@ -16,22 +16,6 @@ class EchoLearnNN(nn.Module):
         self._input_config = input_config
         self._output_config = output_config
         
-        print("Constructing network model:")
-        print(f"  Input:")
-        print(f"    format:        : {self._input_config.format}")
-        print(f"    dimensions:    : {self._input_config.dims}")
-        print(f"    channels:      : {self._input_config.num_channels}")
-        print(f"    summary stats? : {self._input_config.summary_statistics}")
-        print(f"  Output ({'implicit' if self._output_config.implicit else 'dense'}):")
-        print(f"    format:        : {self._output_config.format}")
-        print(f"    dimensions:    : {self._output_config.dims}")
-        print(f"    variance?:     : {self._output_config.predict_variance}")
-        print(f"    channels:      : {self._output_config.num_channels}")
-        if self._output_config.implicit:
-            print(f"    params:     {self._output_config.num_implicit_params}")
-        else:
-            print(f"    resolution: {self._output_config.resolution}")
-        
         def makeConvDown(in_channels, out_channels, dims):
             assert dims in [1, 2]
             ConvType = nn.Conv1d if (dims == 1) else nn.Conv2d
@@ -133,10 +117,6 @@ class EchoLearnNN(nn.Module):
         
         fc_inputs = (intermediate_channels * num_summary_stats) if self._input_config.summary_statistics else (intermediate_channels * intermediate_width)
 
-        print(f"  Middle:")
-        print(f"    FC input size  : {fc_inputs} + {self._output_config.num_implicit_params}")
-        print("")
-        
         self.fullyConnected = nn.Sequential(
             makeFullyConnected(fc_inputs + self._output_config.num_implicit_params, 128),
             makeFullyConnected(128, 512)
