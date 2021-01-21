@@ -16,7 +16,11 @@ def make_spectrogram_single(audio_raw):
         noverlap=window_size*7//8
     )
     # Sxx = Sxx[:num_frequency_bins,:]
-    return np.log(np.clip(np.abs(Sxx), a_min=1e-6, a_max=None))
+    sg = np.log(np.clip(np.abs(Sxx), a_min=1e-6, a_max=128))
+    measured_lower_bound = -14.0
+    measured_upper_bound = 5.0
+    sg_normalized = (sg - measured_lower_bound) / (measured_upper_bound - measured_lower_bound)
+    return sg_normalized
 
 def make_spectrogram(audio_raw):
     dims = audio_raw.shape

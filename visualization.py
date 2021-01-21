@@ -58,7 +58,7 @@ def plot_image(plt_axis, img, display_fn, output_config):
     assert y.shape == (output_config.resolution, output_config.resolution)
     plt_axis.imshow(display_fn(y), interpolation="bicubic")
     if (output_config.predict_variance):
-        sigma = 1.0 / img[1]
+        sigma = img[1]
         assert sigma.shape == (output_config.resolution, output_config.resolution)
         sigma_clamped = torch.clamp(sigma, 0.0, 1.0)
         gamma_value = 0.5
@@ -78,7 +78,7 @@ def plot_depthmap(plt_axis, data, output_config):
     plt_axis.set_ylim(-0.5, 1.5)
     plt_axis.plot(y, c="black")
     if (output_config.predict_variance):
-        sigma = 1.0 / data[1]
+        sigma = data[1]
         assert sigma.shape == (output_config.resolution,)
         plt_axis.plot(y - sigma, c="red")
         plt_axis.plot(y + sigma, c="red")

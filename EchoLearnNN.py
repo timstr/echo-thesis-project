@@ -175,7 +175,6 @@ class EchoLearnNN(nn.Module):
 
         if self._input_config.summary_statistics:
             ls = torch.linspace(0.0, 1.0, N).unsqueeze(0).unsqueeze(0).to(wx.device)
-            wx = torch.sigmoid(wx)
 
             mom1 = torch.sum(wx * ls, dim=2) / torch.sum(wx, dim=2)
             assert mom1.shape == (B, F)
@@ -231,10 +230,20 @@ class EchoLearnNN(nn.Module):
             assert output.shape == ((B, out_channels) + ((res,) * out_dims))
 
         if (self._output_config.predict_variance):
-            output = torch.cat((
-                output[:, 0:1],
-                torch.exp(torch.clamp(output[:, 1:2], min=-4.0, max=2.0)),
-            ), dim=1)
+            mean = output[:, 0:1]
+            pre_variance = output[:, 1:2]
+
+            variance = torch.exp(pre_variance)
+
+            # variance = torch.min(
+            #     torch.stack((
+            #         torch.exp(pre_variance),
+            #         1.0 + torch.abs(pre_variance)
+            #     ),
+            #     dim=1
+            # ), dim=1)[0]
+
+            output = torch.cat((mean, variance), dim=1)
 
         return DeviceDict({'output': output})
 

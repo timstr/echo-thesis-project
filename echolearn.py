@@ -164,7 +164,7 @@ def main():
         fname = f"{args.experiment}_{timestamp}_{label}.dat"
         return os.path.join(model_path, fname)
 
-    optimizer = torch.optim.Adam(network.parameters(), lr=0.001, weight_decay=0.001)
+    optimizer = torch.optim.Adam(network.parameters(), lr=0.001, weight_decay=1e-4)
 
     timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
 

@@ -23,7 +23,7 @@ def meanAndVarianceLoss(batch_gt, batch_pred):
     y = batch_gt["output"]
     z_hat = batch_pred["output"]
     y_hat = z_hat[:, 0]
-    sigma_hat_inverse = z_hat[:, 1]
+    sigma_hat = z_hat[:, 1]
 
     sqrt2pi = math.sqrt(2.0 * np.pi)
     squared_error = (y - y_hat)**2
@@ -37,15 +37,15 @@ def meanAndVarianceLoss(batch_gt, batch_pred):
     #               = -0.5 * (y - y_hat)^2 * (1/sigma)^2
     #                     - (log(sqrt(2*pi)) - log(1/sigma))
 
-
-    log_numerator = -0.5 * squared_error * sigma_hat_inverse**2
-    sigma_hat_inverse_clamped = torch.clamp(sigma_hat_inverse, min=1e-3)
-    log_denominator = math.log(sqrt2pi) - torch.log(sigma_hat_inverse_clamped)
+    sigma_hat_clamped = torch.clamp(sigma_hat, min=1e-2)
+    log_numerator = -0.5 * squared_error / sigma_hat_clamped**2
+    log_denominator = math.log(sqrt2pi) + torch.log(sigma_hat_clamped)
     log_phi = log_numerator - log_denominator
     nll = torch.mean(-log_phi)
+    mean_pred_var = torch.mean(sigma_hat_clamped).detach()
     terms = {
         "mean_squared_error": torch.mean(squared_error).detach(),
-        "mean_predicted_variance": torch.mean(1.0/sigma_hat_inverse).detach(),
+        "mean_predicted_variance": mean_pred_var,
         "negative_log_likelihood": nll.detach()
     }
     return nll, terms
