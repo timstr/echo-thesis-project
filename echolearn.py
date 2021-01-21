@@ -164,7 +164,7 @@ def main():
         fname = f"{args.experiment}_{timestamp}_{label}.dat"
         return os.path.join(model_path, fname)
 
-    optimizer = torch.optim.Adam(network.parameters(), lr=0.005)
+    optimizer = torch.optim.Adam(network.parameters(), lr=0.001, weight_decay=0.001)
 
     timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
 
@@ -207,7 +207,6 @@ def main():
                 batch_gpu = batch_cpu.to(the_device)
 
                 pred_gpu = network(batch_gpu)
-                pred_cpu = pred_gpu.to('cpu')
                 
                 loss, loss_terms = loss_function(batch_gpu, pred_gpu)
                 optimizer.zero_grad()

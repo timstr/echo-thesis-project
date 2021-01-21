@@ -175,8 +175,9 @@ class EchoLearnNN(nn.Module):
 
         if self._input_config.summary_statistics:
             ls = torch.linspace(0.0, 1.0, N).unsqueeze(0).unsqueeze(0).to(wx.device)
+            wx = torch.sigmoid(wx)
 
-            mom1 = torch.sum(wx * ls, dim=2)
+            mom1 = torch.sum(wx * ls, dim=2) / torch.sum(wx, dim=2)
             assert mom1.shape == (B, F)
 
             mom2 = torch.sum((wx * (ls - mom1.unsqueeze(-1)))**2, dim=2)
