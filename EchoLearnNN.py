@@ -234,15 +234,15 @@ class EchoLearnNN(nn.Module):
             mean = output[:, 0:1]
             pre_variance = output[:, 1:2]
 
-            variance = torch.exp(pre_variance)
+            # variance = torch.exp(pre_variance)
 
-            # variance = torch.min(
-            #     torch.stack((
-            #         torch.exp(pre_variance),
-            #         1.0 + torch.abs(pre_variance)
-            #     ),
-            #     dim=1
-            # ), dim=1)[0]
+            variance = torch.min(
+                torch.stack((
+                    torch.exp(pre_variance),
+                    1.0 + torch.abs(pre_variance)
+                ),
+                dim=1
+            ), dim=1)[0]
 
             output = torch.cat((mean, variance), dim=1)
 

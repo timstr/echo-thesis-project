@@ -165,6 +165,7 @@ def main():
         return os.path.join(model_path, fname)
 
     optimizer = torch.optim.Adam(network.parameters(), lr=0.001, weight_decay=1e-4)
+    maximum_gradient_value = 0.1
 
     timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
 
@@ -211,6 +212,7 @@ def main():
                 loss, loss_terms = loss_function(batch_gpu, pred_gpu)
                 optimizer.zero_grad()
                 loss.backward()
+                torch.nn.utils.clip_grad_value_(network.parameters(), maximum_gradient_value)
                 optimizer.step()
                 losses.append(loss.item())
 

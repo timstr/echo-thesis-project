@@ -63,9 +63,18 @@ def plot_image(plt_axis, img, display_fn, output_config):
         sigma_clamped = torch.clamp(sigma, 0.0, 1.0)
         gamma_value = 0.5
         sigma_curved = sigma_clamped**gamma_value
+        
+        checkerboard_res = output_config.resolution // 8
+        ls = torch.linspace(0.0, checkerboard_res, output_config.resolution)
+        square_wave = 2.0 * torch.round(0.5 * ls - torch.floor(0.5 * ls)) - 1.0
+        checkerboard_y, checkerboard_x = torch.meshgrid(square_wave, -square_wave)
+        checkerboard = 0.5 + 0.5 * checkerboard_y * checkerboard_x
+
+        sigma_curved *= checkerboard
+
         mask = torch.cat((
-            torch.zeros((output_config.resolution, output_config.resolution, 3)),
-            sigma_curved.unsqueeze(-1),
+            torch.zeros((output_config.resolution, output_config.resolution, 3)), # RGB
+            sigma_curved.unsqueeze(-1), # Alpha
         ), dim=2)
         plt_axis.imshow(mask, interpolation="bicubic")
     plt_axis.axis("off")
