@@ -180,7 +180,7 @@ class EchoLearnNN(nn.Module):
             mom1 = torch.sum(wx * ls, dim=2) / torch.sum(wx, dim=2)
             assert mom1.shape == (B, F)
 
-            mom2 = torch.sum((wx * (ls - mom1.unsqueeze(-1)))**2, dim=2)
+            mom2 = torch.sqrt(torch.sum((wx * (ls - mom1.unsqueeze(-1)))**2, dim=2))
             assert mom2.shape == (B, F)
 
             mean = torch.mean(wx, dim=2)

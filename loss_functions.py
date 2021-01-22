@@ -37,7 +37,7 @@ def meanAndVarianceLoss(batch_gt, batch_pred):
     #               = -0.5 * (y - y_hat)^2 * (1/sigma)^2
     #                     - (log(sqrt(2*pi)) - log(1/sigma))
 
-    sigma_hat_clamped = torch.clamp(sigma_hat, min=1e-2)
+    sigma_hat_clamped = sigma_hat + 1e-2
     log_numerator = -0.5 * squared_error / sigma_hat_clamped**2
     log_denominator = math.log(sqrt2pi) + torch.log(sigma_hat_clamped)
     log_phi = log_numerator - log_denominator

@@ -65,7 +65,7 @@ def plot_image(plt_axis, img, display_fn, output_config):
         sigma_curved = sigma_clamped**gamma_value
         
         checkerboard_res = output_config.resolution // 8
-        ls = torch.linspace(0.0, checkerboard_res, output_config.resolution)
+        ls = torch.linspace(0.0, (checkerboard_res - 1), output_config.resolution)
         square_wave = 2.0 * torch.round(0.5 * ls - torch.floor(0.5 * ls)) - 1.0
         checkerboard_y, checkerboard_x = torch.meshgrid(square_wave, -square_wave)
         checkerboard = 0.5 + 0.5 * checkerboard_y * checkerboard_x
