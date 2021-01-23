@@ -90,7 +90,7 @@ class EchoLearnNN(nn.Module):
             )
             intermediate_width=32
             intermediate_channels=32*5
-        elif self._input_config.format in ["audioraw", "audiowaveshaped"]:
+        elif self._input_config.format in ["audioraw", "audiowaveshaped", "gccphat"]:
             self.convIn = nn.Sequential(
                 makeConvDown(channels_in, 16, dims_in),
                 makeConvDown(16, 16, dims_in),

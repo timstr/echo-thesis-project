@@ -1,5 +1,5 @@
 from featurize import CIRCLE
-from featurize_audio import make_spectrogram, sclog
+from featurize_audio import make_gcc_phat, make_spectrogram, sclog
 import math
 import numpy as np
 import torch
@@ -157,14 +157,18 @@ def combine_emitted_signals(impulse_responses, emitter_config, receiver_config):
     return out_signal
 
 class InputConfig:
-    def __init__(self, receiver_config, format="spectrogram", summary_statistics=True):
-        assert format in ["audioraw", "audiowaveshaped", "spectrogram"]
+    def __init__(self, emitter_config, receiver_config, format="spectrogram", summary_statistics=True):
+        assert format in ["audioraw", "audiowaveshaped", "spectrogram", "gccphat"]
+        assert isinstance(emitter_config, EmitterConfig)
         assert isinstance(receiver_config, ReceiverConfig)
         self.format = format
-        self.num_channels = receiver_config.count # TODO: change this in case of GCC-PHAT
+        # HACK to simplify emitter arrangements (only mono is being used right now)
+        assert len(emitter_config.emitted_signals) == 1
+        self.emitted_signal = emitter_config.emitted_signals[0]
+        self.num_channels = receiver_config.count
         self.summary_statistics = summary_statistics
 
-        self.dims = 2 if (self.format == "spectrogram") else 1
+        self.dims = 2 if (self.format in ["spectrogram"]) else 1
 
     def print(self):
         print(f"Input Configuration:")
@@ -212,6 +216,8 @@ def transform_received_signals(received_signals, input_config):
         return sclog(received_signals)
     elif input_config.format == "spectrogram":
         return make_spectrogram(received_signals)
+    elif input_config.format == "gccphat":
+        return make_gcc_phat(input_config.emitted_signal, received_signals)
     else:
         raise Exception(f"Unrecognized input format: '{input_config.format}'")
 

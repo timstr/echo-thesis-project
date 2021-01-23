@@ -11,7 +11,7 @@ def main():
     tcfg = TrainingConfig()#max_examples=128)
     ecfg = EmitterConfig()
     rcfg = ReceiverConfig()
-    icfg = InputConfig(rcfg, format="spectrogram")
+    icfg = InputConfig(ecfg, rcfg, format="spectrogram")
     ocfg = OutputConfig(format="sdf")
 
     wsds = WaveSimDataset(tcfg, icfg, ocfg, ecfg, rcfg)

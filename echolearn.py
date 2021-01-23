@@ -46,7 +46,7 @@ def main():
     parser.add_argument("--importancesampling", dest="importancesampling", default=False, action="store_true")
     parser.add_argument("--predictvariance", dest="predictvariance", default=False, action="store_true")
     parser.add_argument("--resolution", type=int, dest="resolution", default=128)
-    parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram"], required=True)
+    parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram", "gccphat"], required=True)
     parser.add_argument("--nnoutput", type=str, dest="nnoutput", choices=["sdf", "heatmap", "depthmap"], required=True)
     parser.add_argument("--summarystatistics", dest="summarystatistics", default=False, action="store_true")
     parser.add_argument("--simplenn", dest="simplenn", default=False, action="store_true")
@@ -72,6 +72,7 @@ def main():
 
     input_config = InputConfig(
         format=args.nninput,
+        emitter_config=emitter_config,
         receiver_config=receiver_config,
         summary_statistics=args.summarystatistics
     )

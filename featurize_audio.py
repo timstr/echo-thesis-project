@@ -32,6 +32,29 @@ def make_spectrogram(audio_raw):
             out.append(make_spectrogram(audio_raw[i]))
         return np.array(out)
 
+def make_gcc_phat_single(original, echo):
+    n = 2048 # Number of audio samples in dataset version 9
+    assert original.shape == (n,)
+    assert echo.shape == (n,)
+    # Adapted from https://github.com/xiongyihui/tdoa/blob/a52505672f15b50f1c07606e6609bb1cb016add8/gcc_phat.py under the Apache License 2.0
+    sig = np.fft.rfft(echo, n=n)
+    refsig = np.fft.rfft(original, n=n)
+    r = sig * np.conj(refsig)
+    cc = np.fft.irfft(r / np.abs(r), n=n)
+    assert cc.shape == (n,)
+    return cc.astype("float32")
+
+def make_gcc_phat(original, echoes):
+    n = 2048 # Number of audio samples in dataset version 9
+    assert original.shape == (n,)
+    assert len(echoes.shape) == 2
+    assert echoes.shape[1] == n
+    res = np.stack([
+        make_gcc_phat_single(original, echo) for echo in echoes
+    ], axis=0)
+    assert res.shape == (echoes.shape[0], n)
+    return res
+
 # signed, clipped logarithm
 def sclog(t):
     max_val = 1e0
