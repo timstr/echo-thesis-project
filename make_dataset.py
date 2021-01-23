@@ -2,7 +2,8 @@ import fix_dead_command_line
 
 import os
 import numpy as np
-from featurize import CIRCLE, RECTANGLE, all_possible_obstacles, obstacles_occluded
+from shape_types import CIRCLE, RECTANGLE
+from featurize import all_possible_obstacles, obstacles_occluded
 import pickle
 import torch
 import math

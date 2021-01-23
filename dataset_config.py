@@ -1,5 +1,5 @@
-from featurize import CIRCLE
-from featurize_audio import make_gcc_phat, make_spectrogram, sclog
+from shape_types import CIRCLE
+from featurize_audio import make_spectrogram, make_gcc_phat, sclog
 import math
 import numpy as np
 import torch
