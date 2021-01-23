@@ -86,24 +86,22 @@ class EchoLearnNN(nn.Module):
                 makeConvDown(channels_in, 16, dims_in),
                 makeConvDown(16, 32, dims_in),
                 makeConvDown(32, 32, dims_in),
-                makeConvDown(32, 64, dims_in),
-                makeConvDown(64, 64, dims_in),
-                Reshape((64,2,8), (128,8))
+                Reshape((32,5,32), (32*5,32))
             )
-            intermediate_width=8
-            intermediate_channels=128
+            intermediate_width=32
+            intermediate_channels=32*5
         elif self._input_config.format in ["audioraw", "audiowaveshaped"]:
             self.convIn = nn.Sequential(
                 makeConvDown(channels_in, 16, dims_in),
                 makeConvDown(16, 16, dims_in),
                 makeConvDown(16, 32, dims_in),
-                makeConvDown(32, 32, dims_in),
-                makeConvDown(32, 32, dims_in),
-                makeConvDown(32, 32, dims_in),
-                Reshape((32,32), (32,32)) # safety check
+                makeConvDown(32, 64, dims_in),
+                makeConvDown(64, 64, dims_in),
+                makeConvDown(64, 128, dims_in),
+                Reshape((128,32), (128,32)) # safety check
             )
             intermediate_width=32
-            intermediate_channels=32
+            intermediate_channels=128
         else:
             raise Exception(f"Unrecognized input format: '{self._input_config.format}'")
 
@@ -186,10 +184,10 @@ class EchoLearnNN(nn.Module):
             mean = torch.mean(wx, dim=2)
             assert mean.shape == (B, F)
 
-            variance = torch.var(wx, dim=2)
-            assert variance.shape == (B, F)
+            std = torch.std(wx, dim=2)
+            assert std.shape == (B, F)
 
-            summary_stats = torch.stack((mom1, mom2, mean, variance), dim=2)
+            summary_stats = torch.stack((mom1, mom2, mean, std), dim=2)
             assert summary_stats.shape == (B, F, 4)
 
             fc_input = summary_stats.reshape(B, F * 4)

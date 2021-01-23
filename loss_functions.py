@@ -37,12 +37,12 @@ def meanAndVarianceLoss(batch_gt, batch_pred):
     #               = -0.5 * (y - y_hat)^2 * (1/sigma)^2
     #                     - (log(sqrt(2*pi)) - log(1/sigma))
 
-    sigma_hat_clamped = sigma_hat + 1e-2
-    log_numerator = -0.5 * squared_error / sigma_hat_clamped**2
-    log_denominator = math.log(sqrt2pi) + torch.log(sigma_hat_clamped)
+    sigma_hat_plus_epsilon = sigma_hat + 1e-2
+    log_numerator = -0.5 * squared_error / sigma_hat_plus_epsilon**2
+    log_denominator = math.log(sqrt2pi) + torch.log(sigma_hat_plus_epsilon)
     log_phi = log_numerator - log_denominator
     nll = torch.mean(-log_phi)
-    mean_pred_var = torch.mean(sigma_hat_clamped).detach()
+    mean_pred_var = torch.mean(sigma_hat_plus_epsilon).detach()
     terms = {
         "mean_squared_error": torch.mean(squared_error).detach(),
         "mean_predicted_variance": mean_pred_var,
@@ -55,31 +55,32 @@ def compute_loss_on_dataset(model, dataset_loader, loss_function, batch_size):
     """
     loss function must have signature (batch_ground_truth: DeviceDict, batch_prediction: DeviceDict) => number, dict_of_labeled_numbers
     """
-    assert isinstance(model, EchoLearnNN)
-    losses = []
-    is_implicit = model._output_config.implicit
-    res = model._output_config.resolution
-    output_fmt = model._output_config.format
-    output_dim = model._output_config.dims
-    for i, batch in enumerate(dataset_loader):
-        if is_implicit:
-            num_splits = res**output_dim * batch_size // what_my_gpu_can_handle
-            batches = make_deterministic_validation_batches_implicit(batch, output_fmt, res, num_splits)
-            
-            losses_batch = []
-            for b in batches:
-                b = b.to(the_device)
-                pred = model(b)
-                loss, _ = loss_function(b, pred)
-                pred = None
+    with torch.no_grad():
+        assert isinstance(model, EchoLearnNN)
+        losses = []
+        is_implicit = model._output_config.implicit
+        res = model._output_config.resolution
+        output_fmt = model._output_config.format
+        output_dim = model._output_config.dims
+        for i, batch in enumerate(dataset_loader):
+            if is_implicit:
+                num_splits = res**output_dim * batch_size // what_my_gpu_can_handle
+                batches = make_deterministic_validation_batches_implicit(batch, output_fmt, res, num_splits)
+                
+                losses_batch = []
+                for b in batches:
+                    b = b.to(the_device)
+                    pred = model(b)
+                    loss, _ = loss_function(b, pred)
+                    pred = None
 
-                losses_batch.append(loss.item())
-            losses.append(np.mean(np.asarray(losses_batch)))
-        else:
-            batch = batch.to(the_device)
-            pred = model(batch)
-            loss, _ = loss_function(batch, pred)
-            pred = None
-            losses.append(loss.item())
-        progress_bar(i, len(dataset_loader))
-    return np.mean(np.asarray(losses))
+                    losses_batch.append(loss.item())
+                losses.append(np.mean(np.asarray(losses_batch)))
+            else:
+                batch = batch.to(the_device)
+                pred = model(batch)
+                loss, _ = loss_function(batch, pred)
+                pred = None
+                losses.append(loss.item())
+            progress_bar(i, len(dataset_loader))
+        return np.mean(np.asarray(losses))
