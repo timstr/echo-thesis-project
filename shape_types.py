@@ -1,0 +1,2 @@
+CIRCLE = "Circle"
+RECTANGLE = "Rectangle"

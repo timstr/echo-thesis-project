@@ -1,7 +1,8 @@
 import torch
 
 from wave_simulation import step_simulation
-from featurize import CIRCLE, RECTANGLE, make_random_obstacles, all_yx_locations, heatmap_batch
+from shape_types import CIRCLE, RECTANGLE
+from featurize import  make_random_obstacles, all_yx_locations, heatmap_batch
 
 from the_device import the_device
 

@@ -5,8 +5,7 @@ import PIL.Image
 from device_dict import DeviceDict
 from dataset_config import OutputConfig, ReceiverConfig
 from EchoLearnNN import EchoLearnNN
-from the_device import what_my_gpu_can_handle
-from featurize import make_depthmap_gt, make_depthmap_pred, make_heatmap_image_gt, make_heatmap_image_pred, make_sdf_image_gt, make_sdf_image_pred, red_white_blue, red_white_blue_banded
+from featurize import make_dense_implicit_output_pred, make_depthmap_gt, make_heatmap_image_gt, make_sdf_image_gt, red_white_blue, red_white_blue_banded
 
 def plot_inputs(plt_axis, batch, receiver_config):
     assert isinstance(batch, DeviceDict)
@@ -97,17 +96,13 @@ def plot_prediction(plt_axis, batch, network, output_config):
     assert isinstance(network, EchoLearnNN)
     assert isinstance(output_config, OutputConfig)
     if output_config.implicit:
+        img = make_dense_implicit_output_pred(batch, network, output_config)
         if output_config.format == "sdf":
-            num_splits = output_config.resolution**2 // what_my_gpu_can_handle
-            img = make_sdf_image_pred(batch, output_config.resolution, network, num_splits, output_config.predict_variance)
             plot_image(plt_axis, img, red_white_blue_banded, output_config)
         elif output_config.format == "heatmap":
-            num_splits = output_config.resolution**2 // what_my_gpu_can_handle
-            img = make_heatmap_image_pred(batch, output_config.resolution, network, num_splits, output_config.predict_variance)
             plot_image(plt_axis, img, red_white_blue, output_config)
         elif output_config.format == "depthmap":
-            arr = make_depthmap_pred(batch, output_config.resolution, network)
-            plot_depthmap(plt_axis, arr, output_config)
+            plot_depthmap(plt_axis, img, output_config)
         else:
             raise Exception("Unrecognized output representation")
     else:

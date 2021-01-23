@@ -1,4 +1,4 @@
-from featurize import CIRCLE
+from shape_types import CIRCLE
 from featurize_audio import make_spectrogram, sclog
 import math
 import numpy as np

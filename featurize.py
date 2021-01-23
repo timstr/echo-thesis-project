@@ -1,17 +1,14 @@
+from EchoLearnNN import EchoLearnNN
+from dataset_config import OutputConfig
 import torch
 import math
-import scipy.interpolate
 import numpy as np
 import random
 import itertools
 
-from torch import linspace
-
-from the_device import the_device
+from shape_types import CIRCLE, RECTANGLE
+from the_device import the_device, what_my_gpu_can_handle
 from device_dict import DeviceDict
-
-CIRCLE = "Circle"
-RECTANGLE = "Rectangle"
 
 # TODO:
 # - spectrogram
@@ -450,6 +447,24 @@ def make_depthmap_pred(example, img_size, network):
     outputDims = pred.shape[1]
     assert pred.shape[2] == img_size
     return pred.reshape(outputDims, img_size).detach().cpu()
+
+def make_dense_implicit_output_pred(example, network, output_config):
+    assert isinstance(example, DeviceDict)
+    assert isinstance(network, EchoLearnNN)
+    assert isinstance(output_config, OutputConfig)
+    assert output_config.implicit
+    res = output_config.resolution
+    var = output_config.predict_variance
+    if output_config.format == "sdf":
+        num_splits = res**2 // what_my_gpu_can_handle
+        return make_sdf_image_pred(example, res, network, num_splits, var)
+    elif output_config.format == "heatmap":
+        num_splits = res**2 // what_my_gpu_can_handle
+        return make_heatmap_image_pred(example, res, network, num_splits, var)
+    elif output_config.format == "depthmap":
+        return make_depthmap_pred(example, res, network)
+    else:
+        raise Exception("Unrecognized output representation")
 
 def obstacle_radius(o):
     t = o[0]

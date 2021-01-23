@@ -4,7 +4,8 @@ import torch
 import glob
 import os
 
-from featurize import make_implicit_params_train, make_implicit_outputs, make_dense_outputs, CIRCLE
+from shape_types import CIRCLE
+from featurize import make_implicit_params_train, make_implicit_outputs, make_dense_outputs
 from device_dict import DeviceDict
 from progress_bar import progress_bar
 
