@@ -13,6 +13,7 @@ def meanSquaredErrorLoss(batch_gt, batch_pred):
     assert isinstance(batch_pred, DeviceDict)
     x1 = batch_gt["output"]
     x2 = batch_pred["output"][:, 0]
+    assert x1.shape == x2.shape
     mse = torch.nn.functional.mse_loss(x1, x2)
     terms = { "mean_squared_error": mse }
     return mse, terms
@@ -51,7 +52,7 @@ def meanAndVarianceLoss(batch_gt, batch_pred):
     return nll, terms
 
 
-def compute_loss_on_dataset(model, dataset_loader, loss_function, batch_size):
+def compute_loss_on_dataset(model, dataset_loader, loss_function, output_config):
     """
     loss function must have signature (batch_ground_truth: DeviceDict, batch_prediction: DeviceDict) => number, dict_of_labeled_numbers
     """
@@ -64,8 +65,7 @@ def compute_loss_on_dataset(model, dataset_loader, loss_function, batch_size):
         output_dim = model._output_config.dims
         for i, batch in enumerate(dataset_loader):
             if is_implicit:
-                num_splits = res**output_dim * batch_size // what_my_gpu_can_handle
-                batches = make_deterministic_validation_batches_implicit(batch, output_fmt, res, num_splits)
+                batches = make_deterministic_validation_batches_implicit(batch, output_config)
                 
                 losses_batch = []
                 for b in batches:

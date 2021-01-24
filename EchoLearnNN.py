@@ -45,8 +45,8 @@ class EchoLearnNN(nn.Module):
                 return lin
 
         def makeConvUp(in_channels, out_channels, scale_factor, dims):
-            assert dims in [1, 2]
-            ConvType = nn.ConvTranspose1d if (dims == 1) else nn.ConvTranspose2d
+            assert dims in [1, 2, 3]
+            ConvType = [nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d][dims - 1]
             return ConvType(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -58,8 +58,8 @@ class EchoLearnNN(nn.Module):
 
         def makeConvSame(in_channels, out_channels, kernel_size, dims, activation=True):
             assert kernel_size % 2 == 1
-            assert dims in [1, 2]
-            ConvType = nn.Conv1d if (dims == 1) else nn.Conv2d
+            assert dims in [1, 2, 3]
+            ConvType = [nn.Conv1d, nn.Conv2d, nn.Conv3d][dims - 1]
             conv = ConvType(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -80,8 +80,20 @@ class EchoLearnNN(nn.Module):
         channels_in = self._input_config.num_channels
         channels_out = self._output_config.num_channels
 
-
-        if self._input_config.format == "spectrogram":
+        if self._input_config.using_echo4ch:
+            assert self._input_config.format == "spectrogram"
+            self.convIn = nn.Sequential(
+                makeConvDown(channels_in, 16, dims_in),
+                makeConvSame(16, 16, 3, dims_in),
+                makeConvDown(16, 16, dims_in),
+                makeConvSame(16, 8, 3, dims_in),
+                makeConvDown(8, 4, dims_in),
+                Reshape((4,32,32), (4*32,32))
+            )
+            intermediate_width=32
+            intermediate_channels=4*32
+        elif self._input_config.format == "spectrogram":
+            assert not self._input_config.using_echo4ch
             self.convIn = nn.Sequential(
                 makeConvDown(channels_in, 16, dims_in),
                 makeConvDown(16, 32, dims_in),
@@ -91,6 +103,7 @@ class EchoLearnNN(nn.Module):
             intermediate_width=32
             intermediate_channels=32*5
         elif self._input_config.format in ["audioraw", "audiowaveshaped", "gccphat"]:
+            assert not self._input_config.using_echo4ch
             self.convIn = nn.Sequential(
                 makeConvDown(channels_in, 16, dims_in),
                 makeConvDown(16, 16, dims_in),
@@ -154,6 +167,18 @@ class EchoLearnNN(nn.Module):
                 makeConvSame(32, 32, 3, dims=2), # 16x16
                 *convsFlex,                        # (final size)
                 makeConvSame(32, channels_out, kernel_size=1, dims=2, activation=False),
+            )
+        elif dims_out == 3:
+            assert self._output_config.resolution == 64
+            self.final = nn.Sequential(
+                Reshape((512,), (8, 4, 4, 4)),
+                makeConvUp(8, 8, 4, dims=3), # 16^3
+                makeConvSame(8, 8, 3, dims=3),
+                makeConvUp(8, 8, 4, dims=3), # 64^3
+                makeConvSame(8, 8, 3, dims=3),
+                makeConvSame(8, 8, 3, dims=3),
+                makeConvSame(8, channels_out, kernel_size=1, dims=3, activation=False),
+                Reshape((channels_out, 64, 64, 64), (channels_out, 64, 64, 64)) # Safety check
             )
         else:
             raise Exception("Unrecognized output format")

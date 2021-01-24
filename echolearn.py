@@ -16,6 +16,7 @@ import datetime
 from the_device import the_device
 from device_dict import DeviceDict
 from dataset import WaveSimDataset
+from Echo4ChDataset import Echo4ChDataset
 from progress_bar import progress_bar
 from custom_collate_fn import custom_collate
 
@@ -30,6 +31,7 @@ def main():
     parser.add_argument("--maxexamples", type=int, dest="maxexamples", default=None)
     parser.add_argument("--batchsize", type=int, dest="batchsize", default=4)
     parser.add_argument("--receivercount", type=int, choices=[1, 2, 4, 8, 16, 32, 64], dest="receivercount", default=8)
+    parser.add_argument("--dataset", type=str, choices=["wavesim", "echo4ch"], dest="dataset", default="wavesim")
     parser.add_argument("--receiverarrangement", type=str, choices=["flat", "grid"], dest="receiverarrangement", default="grid")
     parser.add_argument("--emitterarrangement", type=str, choices=["mono", "stereo", "surround"], dest="emitterarrangement", default="mono")
     parser.add_argument("--emittersignal", type=str, choices=["impulse", "beep", "sweep"], dest="emittersignal", default="sweep")
@@ -58,6 +60,9 @@ def main():
     if args.nodisplay:
         matplotlib.use("Agg")
 
+    dataset_name = args.dataset
+    using_echo4ch = (dataset_name == "echo4ch")
+
     emitter_config = EmitterConfig(
         arrangement=args.emitterarrangement,
         format=args.emittersignal,
@@ -74,14 +79,16 @@ def main():
         format=args.nninput,
         emitter_config=emitter_config,
         receiver_config=receiver_config,
-        summary_statistics=args.summarystatistics
+        summary_statistics=args.summarystatistics,
+        using_echo4ch=using_echo4ch
     )
 
     output_config = OutputConfig(
         format=args.nnoutput,
         implicit=args.implicitfunction,
         predict_variance=args.predictvariance,
-        resolution=args.resolution
+        resolution=args.resolution,
+        using_echo4ch=using_echo4ch
     )
 
     training_config = TrainingConfig(
@@ -93,7 +100,9 @@ def main():
         samples_per_example=args.samplesperexample
     )
 
+
     print("============== CONFIGURATIONS ==============")
+    print(f"Dataset: {args.dataset}")
     emitter_config.print()
     receiver_config.print()
     input_config.print()
@@ -105,21 +114,32 @@ def main():
     if (args.nosave):
         print("NOTE: networks are not being saved")
 
-    ecds = WaveSimDataset(
-        training_config,
-        input_config,
-        output_config,
-        emitter_config,
-        receiver_config
-    )
+    if dataset_name == "wavesim":
+        ds = WaveSimDataset(
+            training_config,
+            input_config,
+            output_config,
+            emitter_config,
+            receiver_config
+        )
+    elif dataset_name == "echo4ch":
+        ds = Echo4ChDataset(
+            training_config,
+            input_config,
+            output_config,
+            emitter_config,
+            receiver_config
+        )
+    else:
+        raise Exception(f"Unrecognized dataset type \"{dataset_name}\"")
 
     val_ratio = 0.1
-    val_size = int(len(ecds)*val_ratio)
+    val_size = int(len(ds)*val_ratio)
     indices_val = list(range(0, val_size))
-    indices_train = list(range(val_size, len(ecds)))
+    indices_train = list(range(val_size, len(ds)))
 
-    val_set   = torch.utils.data.Subset(ecds, indices_val)
-    train_set = torch.utils.data.Subset(ecds, indices_train)
+    val_set   = torch.utils.data.Subset(ds, indices_val)
+    train_set = torch.utils.data.Subset(ds, indices_train)
 
     # define the dataset loader (batch size, shuffling, ...)
     collate_fn_device = lambda batch : DeviceDict(custom_collate(batch))
@@ -146,7 +166,7 @@ def main():
     loss_function = meanAndVarianceLoss if output_config.predict_variance else meanSquaredErrorLoss
 
     def validation_loss(the_network):
-        return compute_loss_on_dataset(the_network, val_loader, meanSquaredErrorLoss, args.batchsize)
+        return compute_loss_on_dataset(the_network, val_loader, meanSquaredErrorLoss, output_config)
 
     NetworkType = SimpleNN if args.simplenn else EchoLearnNN
 
@@ -165,7 +185,7 @@ def main():
         fname = f"{args.experiment}_{timestamp}_{label}.dat"
         return os.path.join(model_path, fname)
 
-    optimizer = torch.optim.Adam(network.parameters(), lr=0.001, weight_decay=1e-9)
+    optimizer = torch.optim.Adam(network.parameters(), lr=0.001, weight_decay=1e-10)
     maximum_gradient_norm = 20.0
 
     timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")

@@ -40,6 +40,15 @@ def all_yx_locations(size):
         dim=2
     ).reshape(size**2, 2).permute(1, 0)
 
+def all_zyx_locations(size):
+    ls = torch.linspace(0, 1, size).to(the_device)
+    zyx = torch.stack(
+        torch.meshgrid((ls, ls, ls)),
+        dim=3
+    )
+    zyx = zyx.reshape(size**3, 3).permute(1, 0)
+    return zyx
+
 
 def cutout_circle(barrier, y, x, rad):
     h, w = barrier.shape
@@ -360,13 +369,13 @@ def lines_of_sight_from_bottom_up(obs, values):
 def make_image_pred(example, img_size, network, num_splits, predict_variance):
     num_splits = max(num_splits, 1)
     num_dims = 2 if predict_variance else 1
-    outputs = torch.zeros(num_dims, img_size**2)
-    assert (img_size**2 % num_splits) == 0
-    split_size = img_size**2 // num_splits
+    num_samples = img_size**2
+    outputs = torch.zeros(num_dims, num_samples)
+    assert (num_samples % num_splits) == 0
+    split_size = num_samples // num_splits
     xy_locations = all_yx_locations(img_size).permute(1, 0).unsqueeze(0)
     d = DeviceDict({
         "input": example["input"][:1],
-        
     })
     for i in range(num_splits):
         begin = i * split_size
@@ -377,6 +386,27 @@ def make_image_pred(example, img_size, network, num_splits, predict_variance):
         outputs[:, begin:end] = pred.reshape(num_dims, split_size).detach()
         pred = None
     return outputs.reshape(num_dims, img_size, img_size).detach().cpu()
+
+def make_volume_pred(example, img_size, network, num_splits, predict_variance):
+    num_splits = max(num_splits, 1)
+    num_dims = 2 if predict_variance else 1
+    num_samples = img_size**3
+    outputs = torch.zeros(num_dims, num_samples)
+    assert (num_samples % num_splits) == 0
+    split_size = num_samples // num_splits
+    xyz_locations = all_zyx_locations(img_size).permute(1, 0).unsqueeze(0)
+    d = DeviceDict({
+        "input": example["input"][:1],
+    })
+    for i in range(num_splits):
+        begin = i * split_size
+        end = (i + 1) * split_size
+        d["params"] = xyz_locations[:, begin:end]
+        pred = network(d)["output"]
+        assert pred.shape == (1, num_dims, split_size)
+        outputs[:, begin:end] = pred.reshape(num_dims, split_size).detach()
+        pred = None
+    return outputs.reshape(num_dims, img_size, img_size, img_size).detach().cpu()
 
 def make_sdf_image_pred(example, img_size, network, num_splits, predict_variance):
     return make_image_pred(example, img_size, network, num_splits, predict_variance)
@@ -418,6 +448,16 @@ def red_white_blue(img):
     blue  = colour(0.23, 0.30, 0.75)
     return close_to_one * red + close_to_half * white + close_to_zero * blue
     
+def purple_yellow(img):
+    assert len(img.shape) == 2
+    img = torch.clamp(img, min=0.0, max=1.0).unsqueeze(-1)
+    def colour(r, g, b):
+        return torch.tensor([r, g, b], dtype=torch.float, device=img.device).reshape(1, 1, 3)
+    purple = colour(0.27, 0.00, 0.33)
+    yellow = colour(0.99, 0.91, 0.14)
+    
+    return (1.0 - img) * purple + img * yellow
+
 
 def make_heatmap_image_pred(example, img_size, network, num_splits, predict_variance):
     return make_image_pred(example, img_size, network, num_splits, predict_variance)
@@ -447,6 +487,29 @@ def make_depthmap_pred(example, img_size, network):
     outputDims = pred.shape[1]
     assert pred.shape[2] == img_size
     return pred.reshape(outputDims, img_size).detach().cpu()
+
+def make_echo4ch_heatmap_volume_pred(example, resolution, network, num_splits, predict_variance):
+    return make_volume_pred(example, resolution, network, num_splits, predict_variance)
+
+def make_echo4ch_depthmap_image_pred(example, resolution, network, num_splits, predict_variance):
+    return make_image_pred(example, resolution, network, num_splits, predict_variance)
+
+def make_echo4ch_dense_implicit_output_pred(example, network, output_config):
+    assert isinstance(example, DeviceDict)
+    assert isinstance(network, EchoLearnNN)
+    assert isinstance(output_config, OutputConfig)
+    assert output_config.implicit
+    res = output_config.resolution
+    var = output_config.predict_variance
+    assert res == 64
+    if output_config.format == "depthmap":
+        num_splits = res**2 // what_my_gpu_can_handle
+        return make_echo4ch_depthmap_image_pred(example, res, network, num_splits, var)
+    elif output_config.format == "heatmap":
+        num_splits = res**3 // what_my_gpu_can_handle
+        return make_echo4ch_heatmap_volume_pred(example, res, network, num_splits, var)
+    else:
+        raise Exception("Unrecognized output representation")
 
 def make_dense_implicit_output_pred(example, network, output_config):
     assert isinstance(example, DeviceDict)
@@ -581,14 +644,19 @@ def make_implicit_params_train(num, representation):
     dim = 1 if (representation == "depthmap") else 2
     return torch.rand(num, dim)
     
-def make_implicit_params_validation(img_size, representation):
+def make_implicit_params_validation(img_size, dims):
+    assert dims in [1, 2, 3]
     ls = torch.linspace(0, 1, img_size)
-    if (representation == "depthmap"):
+    if dims == 1:
         return ls.reshape(1, img_size, 1)
-    return torch.stack(
-        torch.meshgrid(ls, ls),
-        dim=2
-    ).to(the_device).reshape(1, img_size**2, 2)
+    elif dims == 2:
+        return torch.stack(
+            torch.meshgrid((ls, ls)),
+            dim=2
+        ).to(the_device).reshape(1, img_size**2, 2)
+    elif dims == 3:
+        # HACK: Not as "accurate" as the above methods which evaluate at each and every point, but I just don't have the patience for doing so in 3D
+        return torch.rand((1, img_size**2, 3)).to(the_device)
 
 def make_implicit_outputs(obs, params, representation):
     assert len(params.shape) == 2
@@ -620,12 +688,47 @@ def make_dense_outputs(obs, representation, img_size):
         raise Exception("Unown representation")
     return output
 
-def make_deterministic_validation_batches_implicit(example, representation, img_size, num_splits):
-    num_splits = max(num_splits, 1)
-    params = make_implicit_params_validation(img_size, representation)
-    obsobs = example["obstacles_list"]
+def sample_dense_output(output, params):
+    dims = len(output.shape)
+    assert dims in [2, 3]
+    assert len(params.shape) == 2
+    assert params.shape[1] == dims
+    N = params.shape[0]
+    if dims == 2:
+        H, W = output.shape
+        D = None
+    elif dims == 3:
+        H, W, D = output.shape
+    else:
+        raise Exception("Unrecognized tensor shape")
+    indices_h = torch.floor(params[:,0] * (H - 1)).to(torch.long)
+    indices_w = torch.floor(params[:,1] * (W - 1)).to(torch.long)
+    indices_flat = W * indices_h + indices_w
+    if D is not None:
+        indices_d = torch.floor(params[:,2] * (W - 1)).to(torch.long)
+        indices_flat = D * indices_flat + indices_d
+    indices_flat = indices_flat.to(output.device)
+    values = torch.index_select(output.reshape(-1), dim=0, index=indices_flat)
+    assert values.shape == (N,)
+    return values
 
-    data_size = img_size if (representation == "depthmap") else img_size**2
+def implicit_samples_from_dense_output(arr, num_samples):
+    dims = len(arr.shape)
+    params = torch.rand((num_samples, dims))
+    values = sample_dense_output(arr, params)
+    return params, values
+
+def make_deterministic_validation_batches_implicit(example, output_config):
+    assert isinstance(output_config, OutputConfig)
+    res = output_config.resolution
+    fmt = output_config.format
+    B = example["input"].shape[0]
+
+    params = make_implicit_params_validation(res, output_config.dims)
+    assert params.shape[0] == 1
+    data_size = params.shape[1]
+
+    num_splits = max(1, data_size * B // what_my_gpu_can_handle)
     assert data_size % num_splits == 0
     split_size = data_size // num_splits
 
@@ -633,11 +736,19 @@ def make_deterministic_validation_batches_implicit(example, representation, img_
     for i in range(num_splits):
         begin = i * split_size
         end = (i + 1) * split_size
-        output = torch.zeros(len(obsobs), split_size)
-        for j, obs in enumerate(obsobs):
-            output[j] = make_implicit_outputs(obs, params[0, begin:end], representation)
+        output = torch.zeros(B, split_size)
+        if output_config.using_echo4ch:
+            output_full = example["gt_depthmap"] if (fmt == "depthmap") else example["gt_heatmap"]
+            for j in range(B):
+                output[j] = sample_dense_output(output_full[0], params[0, begin:end])
+        else:
+            obsobs = example["obstacles_list"]
+            assert len(obsobs) == B
+            for j, obs in enumerate(obsobs):
+                output[j] = make_implicit_outputs(obs, params[0, begin:end], fmt)
         d = DeviceDict(example.copy())
-        d["params"] = params[:, begin:end].repeat(len(obsobs), 1, 1)
+        d["params"] = params[:, begin:end].repeat(B, 1, 1)
         d["output"] = output
         batches.append(d)
     return batches
+

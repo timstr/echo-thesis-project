@@ -157,18 +157,24 @@ def combine_emitted_signals(impulse_responses, emitter_config, receiver_config):
     return out_signal
 
 class InputConfig:
-    def __init__(self, emitter_config, receiver_config, format="spectrogram", summary_statistics=True):
+    def __init__(self, emitter_config, receiver_config, format="spectrogram", summary_statistics=True, using_echo4ch=False):
         assert format in ["audioraw", "audiowaveshaped", "spectrogram", "gccphat"]
         assert isinstance(emitter_config, EmitterConfig)
         assert isinstance(receiver_config, ReceiverConfig)
+
         self.format = format
         # HACK to simplify emitter arrangements (only mono is being used right now)
         assert len(emitter_config.emitted_signals) == 1
         self.emitted_signal = emitter_config.emitted_signals[0]
         self.num_channels = receiver_config.count
         self.summary_statistics = summary_statistics
+        self.using_echo4ch = using_echo4ch
 
         self.dims = 2 if (self.format in ["spectrogram"]) else 1
+
+        if self.using_echo4ch:
+            assert self.format == "spectrogram"
+            assert self.num_channels == 8
 
     def print(self):
         print(f"Input Configuration:")
@@ -178,17 +184,24 @@ class InputConfig:
         print(f"  -> dimensions          : {self.dims}")
 
 class OutputConfig:
-    def __init__(self, format="sdf", implicit=True, predict_variance=True, resolution=1024):
+    def __init__(self, format="sdf", implicit=True, predict_variance=True, resolution=1024, using_echo4ch=False):
         assert format in ["depthmap", "heatmap", "sdf"]
         assert isinstance(implicit, bool)
         assert isinstance(predict_variance, bool)
+        assert isinstance(using_echo4ch, bool)
         assert resolution in [32, 64, 128, 256, 512, 1024]
         self.format = format
         self.implicit = implicit
         self.predict_variance = predict_variance
         self.resolution = resolution
+        self.using_echo4ch = using_echo4ch
 
-        self.dims = 1 if format == "depthmap" else 2
+        if using_echo4ch:
+            assert format != "sdf"
+            assert resolution == 64
+            self.dims = 2 if format == "depthmap" else 3
+        else:
+            self.dims = 1 if format == "depthmap" else 2
         self.num_implicit_params = 0 if not implicit else self.dims
         self.num_channels = 2 if predict_variance else 1
     
