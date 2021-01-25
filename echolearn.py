@@ -21,7 +21,6 @@ from progress_bar import progress_bar
 from custom_collate_fn import custom_collate
 
 from EchoLearnNN import EchoLearnNN
-from SimpleNN import SimpleNN
 
 to_tensor = torchvision.transforms.ToTensor()
 
@@ -51,9 +50,9 @@ def main():
     parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram", "gccphat"], required=True)
     parser.add_argument("--nnoutput", type=str, dest="nnoutput", choices=["sdf", "heatmap", "depthmap"], required=True)
     parser.add_argument("--summarystatistics", dest="summarystatistics", default=False, action="store_true")
-    parser.add_argument("--simplenn", dest="simplenn", default=False, action="store_true")
     parser.add_argument("--plotinterval", type=int, dest="plotinterval", default=32)
     parser.add_argument("--validationinterval", type=int, dest="validationinterval", default=256)
+    parser.add_argument("--restoremodelpath", type=str, dest="restoremodelpath", default=None)
 
     args = parser.parse_args()
 
@@ -114,6 +113,15 @@ def main():
     if (args.nosave):
         print("NOTE: networks are not being saved")
 
+    network = EchoLearnNN(
+        input_config=input_config,
+        output_config=output_config
+    ).to(the_device)
+
+    if args.restoremodelpath is not None:
+        print(f"Restoring model weights from \"{args.restoremodelpath}\"...")
+        network.restore(args.restoremodelpath)
+
     if dataset_name == "wavesim":
         ds = WaveSimDataset(
             training_config,
@@ -167,13 +175,6 @@ def main():
 
     def validation_loss(the_network):
         return compute_loss_on_dataset(the_network, val_loader, meanSquaredErrorLoss, output_config)
-
-    NetworkType = SimpleNN if args.simplenn else EchoLearnNN
-
-    network = NetworkType(
-        input_config=input_config,
-        output_config=output_config
-    ).to(the_device)
 
     model_path = os.environ.get("TRAINING_MODEL_PATH")
 
