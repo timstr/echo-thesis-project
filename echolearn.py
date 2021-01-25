@@ -119,7 +119,6 @@ def main():
     ).to(the_device)
 
     if args.restoremodelpath is not None:
-        print(f"Restoring model weights from \"{args.restoremodelpath}\"...")
         network.restore(args.restoremodelpath)
 
     if dataset_name == "wavesim":
