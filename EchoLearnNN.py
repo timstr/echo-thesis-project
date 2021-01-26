@@ -113,7 +113,7 @@ class EchoLearnNN(nn.Module):
                 makeConvDown(64, 128, dims_in, kernel_size=32),
                 Reshape((128,45), (128,45)) # safety check
             )
-            intermediate_width=50
+            intermediate_width=45
             intermediate_channels=128
         else:
             raise Exception(f"Unrecognized input format: '{self._input_config.format}'")
