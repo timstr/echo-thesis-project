@@ -16,15 +16,15 @@ class EchoLearnNN(nn.Module):
         self._input_config = input_config
         self._output_config = output_config
         
-        def makeConvDown(in_channels, out_channels, dims):
+        def makeConvDown(in_channels, out_channels, dims, kernel_size=3, stride=2):
             assert dims in [1, 2]
             ConvType = nn.Conv1d if (dims == 1) else nn.Conv2d
             return nn.Sequential(
                 ConvType(
                     in_channels=in_channels,
                     out_channels=out_channels,
-                    kernel_size=3,
-                    stride=2,
+                    kernel_size=kernel_size,
+                    stride=stride,
                     padding=1
                 ),
                 nn.ReLU()
@@ -106,14 +106,14 @@ class EchoLearnNN(nn.Module):
             assert not self._input_config.using_echo4ch
             self.convIn = nn.Sequential(
                 makeConvDown(channels_in, 16, dims_in),
-                makeConvDown(16, 16, dims_in),
-                makeConvDown(16, 32, dims_in),
-                makeConvDown(32, 64, dims_in),
-                makeConvDown(64, 64, dims_in),
-                makeConvDown(64, 128, dims_in),
-                Reshape((128,32), (128,32)) # safety check
+                makeConvDown(16, 16, dims_in, kernel_size=128, stride=2),
+                makeConvDown(16, 32, dims_in, kernel_size=128, stride=1),
+                makeConvDown(32, 64, dims_in, kernel_size=64, stride=1),
+                makeConvDown(64, 64, dims_in, kernel_size=32),
+                makeConvDown(64, 128, dims_in, kernel_size=32),
+                Reshape((128,45), (128,45)) # safety check
             )
-            intermediate_width=32
+            intermediate_width=50
             intermediate_channels=128
         else:
             raise Exception(f"Unrecognized input format: '{self._input_config.format}'")
