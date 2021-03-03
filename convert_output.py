@@ -1,4 +1,4 @@
-from dataset_config import OutputConfig
+from config import OutputConfig
 from featurize import make_dense_outputs
 import torch
 

@@ -1,23 +1,16 @@
-from dataset_config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig, combine_emitted_signals, example_should_be_used, transform_received_signals
 import pickle
 import torch
 import glob
 import os
 
-from shape_types import CIRCLE
+from convert_input import combine_emitted_signals, transform_received_signals
+from config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig, example_should_be_used
 from featurize import make_implicit_params_train, make_implicit_outputs, make_dense_outputs
 from device_dict import DeviceDict
 from progress_bar import progress_bar
 
 class WaveSimDataset(torch.utils.data.Dataset):
     def __init__(self, training_config, input_config, output_config, emitter_config, receiver_config):
-        # TODO: document this further
-        """
-            output_representation : the representation of expected outputs, must be one of:
-                                    * "sdf" - signed distance field
-                                    * "heatmap" - binary heatmap
-                                    * "depthmap" - line-of-sight distance, e.g. radarplot
-        """
         super(WaveSimDataset).__init__()
 
         assert isinstance(training_config, TrainingConfig)
@@ -80,12 +73,23 @@ class WaveSimDataset(torch.utils.data.Dataset):
             'input': the_input
         }
 
-        if self._output_config.implicit:
+        if self._output_config.tof_cropping:
+            assert self._input_config.tof_cropping
+            assert self._output_config.dims == 2
+            assert self._output_config.format in ["sdf", "heatmap"]
+            assert self._input_config.format in ["audioraw", "audiowaveshaped", "gccphat"]
+
+            sample_location_yx = torch.rand(2)
+            theDict['output'] = make_implicit_outputs(obstacles, sample_location_yx.unsqueeze(0), self._output_config.format).squeeze(0)
+            theDict['params'] = sample_location_yx
+            
+        elif self._output_config.implicit:
             spe = self._training_config.samples_per_example
             params = make_implicit_params_train(spe, self._output_config.format)
             output = make_implicit_outputs(obstacles, params, self._output_config.format)
             
             if self._training_config.importance_sampling and self._output_config.format != "depthmap":
+                # TODO: move this to a separate function for importance-sampled implicit location
                 def get_filter(x, params):
                     sdf = x if self._output_config == "sdf" else make_implicit_outputs(
                         obstacles,
@@ -101,7 +105,7 @@ class WaveSimDataset(torch.utils.data.Dataset):
                     return mask
                 mask = torch.ones_like(output).bool()
                 iterations = 0
-                while iterations < 8: # and torch.any(mask):
+                while iterations < 8: # and torch.any(mask): # NOTE: torch.any is slow (probably because it computes a reduction over the entire tensor)
                     params[mask] = make_implicit_params_train(spe, self._output_config.format)[mask]
                     output[mask] = make_implicit_outputs(obstacles, params, self._output_config.format)[mask]
                     m = maybe_accept(output, params)

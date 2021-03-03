@@ -8,11 +8,11 @@ from argparse import ArgumentParser
 import os
 import numpy as np
 
-from featurize import make_dense_implicit_output_pred, make_depthmap_pred
+from featurize import make_dense_implicit_output_pred
 from custom_collate_fn import custom_collate
 from device_dict import DeviceDict
 from dataset import WaveSimDataset
-from dataset_config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
+from config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
 from EchoLearnNN import EchoLearnNN
 from the_device import the_device
 from progress_bar import progress_bar
@@ -22,7 +22,6 @@ from convert_output import compute_error_metrics, ground_truth_occupancy, predic
 
 def main():
     parser = ArgumentParser()
-    # TODO: remove all defaults affecting network structure
     parser.add_argument("--description", type=str, dest="description", required=True)
     # parser.add_argument("--batchsize", type=int, dest="batchsize", default=4)
     parser.add_argument("--nodisplay", dest="nodisplay", default=False, action="store_true")
@@ -47,16 +46,6 @@ def main():
     parser.add_argument("--occupancyshadows", dest="occupancyshadows", default=False, action="store_true")
     
     args = parser.parse_args()
-
-    # TODO: construct config objects (just like in echolearn)
-    # TODO: instantiate network
-    # TODO: restore network from file
-    # TODO: load dataset (from same environment variable as in echolearn)
-    # TODO: iterate over dataset, compute desired metrics (save them?) and display/save images
-
-    # Heatmap and SDF can be saved as images without using pyplot
-    # depthmap may need pyplot :(
-
     
     if args.nodisplay:
         matplotlib.use("Agg")
@@ -128,9 +117,7 @@ def main():
         drop_last=True,
         collate_fn=collate_fn_device
     )
-
-    # TODO: add options to visualize just a single example
-    
+ 
     network = EchoLearnNN(input_config, output_config)
     network.restore(args.modelpath)
     network = network.to(the_device)

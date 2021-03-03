@@ -1,12 +1,11 @@
 from featurize import implicit_samples_from_dense_output
-from dataset_config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
+from config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
 import compress_pickle
 import torch
 import glob
 import os
 
 from device_dict import DeviceDict
-from progress_bar import progress_bar
    
 
 class Echo4ChDataset(torch.utils.data.Dataset):
@@ -33,7 +32,7 @@ class Echo4ChDataset(torch.utils.data.Dataset):
         assert self._emitter_config.arrangement == "mono"
         assert self._emitter_config.format == "sweep"
         
-        assert self._receiver_config.count == 8 # HACK: technically the long- and short-window spectrograms are from the same 4 receivers, but this doesn't make a difference
+        assert self._receiver_config.count == 8 # NOTE: technically the long- and short-window spectrograms are from the same 4 receivers, but this doesn't make a difference
         assert self._receiver_config.arrangement == "grid"
 
         assert self._input_config.format == "spectrogram"

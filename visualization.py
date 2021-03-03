@@ -3,9 +3,9 @@ import torchvision
 import PIL.Image
 
 from device_dict import DeviceDict
-from dataset_config import OutputConfig, ReceiverConfig
+from config import OutputConfig, ReceiverConfig
 from EchoLearnNN import EchoLearnNN
-from featurize import make_dense_implicit_output_pred, make_depthmap_gt, make_echo4ch_dense_implicit_output_pred, make_heatmap_image_gt, make_sdf_image_gt, purple_yellow, red_white_blue, red_white_blue_banded
+from featurize import make_dense_implicit_output_pred, make_dense_tof_cropped_output_pred, make_depthmap_gt, make_echo4ch_dense_implicit_output_pred, make_heatmap_image_gt, make_sdf_image_gt, purple_yellow, red_white_blue, red_white_blue_banded
 
 def plot_inputs(plt_axis, batch, receiver_config):
     assert isinstance(batch, DeviceDict)
@@ -154,7 +154,9 @@ def plot_prediction(plt_axis, batch, network, output_config):
         plot_image(plt_axis, output, purple_yellow, output_config, checkerboard_size=checkerboard_size)
         return
 
-    if output_config.implicit:
+    if output_config.tof_cropping:
+        output = make_dense_tof_cropped_output_pred(batch, network, output_config)
+    elif output_config.implicit:
         output = make_dense_implicit_output_pred(batch, network, output_config)
     else:
         output = network(batch)['output'][0].detach().cpu()

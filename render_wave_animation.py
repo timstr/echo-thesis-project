@@ -1,13 +1,12 @@
 import sys
-from scipy.signal.ltisys import step
 import torch
 import matplotlib.animation
 import matplotlib.pyplot as plt
-import math
-import numpy as np
 
 from wave_field import Field, make_random_field
 from progress_bar import progress_bar
+
+from config import wavesim_emitter_locations, wavesim_receiver_locations
 
 size = 512
 
@@ -21,6 +20,22 @@ def render_animation(field, duration, fps=30, output_path="animation.mp4", on_re
     im_field = plt.imshow(
         field.to_image().cpu()
     )
+
+    eys = []
+    exs = []
+    for (ey, ex) in wavesim_emitter_locations:
+        eys.append(ey)
+        exs.append(ex)
+    
+    plt.scatter(exs, eys, s=50, c="yellow")
+
+    rys = []
+    rxs = []
+    for (ry, rx) in wavesim_receiver_locations:
+        rys.append(ry)
+        rxs.append(rx)
+
+    plt.scatter(rxs, rys, s=20, c="white")
 
     num_frames = int(duration * fps)
 
@@ -71,8 +86,9 @@ def render_animation(field, duration, fps=30, output_path="animation.mp4", on_re
 
 def main():
 
-    field = make_random_field(size, 2) # Field with obstacles
-    # field = Field(size, size) # empty field
+    # field = make_random_field(size, 2) # Field with obstacles
+    field = Field(size) # empty field
+    field.add_obstacles([('Rectangle', 0.15000000000000002, 0.15000000000000002, 0.07071067811865475, 0.07071067811865475, 0.7853981633974483), ('Circle', 0.5333333333333333, 0.6000000000000001, 0.1)])
     
     emitter_locations = [
         (size - 8, size // 2 - 200),
@@ -90,10 +106,19 @@ def main():
         if current_frame % steps_per_emitter == 0:
             e = current_frame // steps_per_emitter
             if e < len(emitter_locations):
-                field.get_field()[
-                    emitter_locations[e][0],
-                    emitter_locations[e][1]
-                ] = -30.0
+                the_field = field.get_field()
+                ey = emitter_locations[e][0]
+                ex = emitter_locations[e][1]
+                
+                ls = torch.linspace(0.0, size, size, device="cuda")
+                y, x = torch.meshgrid((ls, ls))
+
+                dist_sqr = (y - ey)**2 + (x - ex)**2
+                amp = -2.0 * torch.exp(-dist_sqr * 0.1)
+
+                the_field[...] += amp
+
+                # -30
         current_frame += 1
 
     # make_wavelet(field)
@@ -110,7 +135,7 @@ def main():
     # plt.show()
 
     num_steps = 4096
-    render_interval = 8
+    render_interval = 4
     fps = 30
     duration = num_steps / fps / render_interval
     render_animation(

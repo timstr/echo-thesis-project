@@ -60,9 +60,6 @@ def compute_loss_on_dataset(model, dataset_loader, loss_function, output_config)
         assert isinstance(model, EchoLearnNN)
         losses = []
         is_implicit = model._output_config.implicit
-        res = model._output_config.resolution
-        output_fmt = model._output_config.format
-        output_dim = model._output_config.dims
         for i, batch in enumerate(dataset_loader):
             if is_implicit:
                 batches = make_deterministic_validation_batches_implicit(batch, output_config)

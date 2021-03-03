@@ -1,8 +1,10 @@
 import torch
 import scipy.signal
-import scipy.io.wavfile as wf
 import numpy as np
 import math
+
+from config import InputConfig, wavesim_duration
+from wavesim_params import wavesim_field_size, wavesim_speed_of_sound, wavesim_emitter_locations, wavesim_receiver_locations
 
 def make_spectrogram_single(audio_raw):
     assert len(audio_raw.shape) == 1
@@ -72,3 +74,81 @@ def normalize_amplitude(waveform):
     if max_amp > 1e-3:
         waveform = (0.5 / max_amp) * waveform
     return waveform
+
+def crop_audio_from_location(received_signals, input_config, sample_y, sample_x):
+    assert isinstance(received_signals, torch.Tensor)
+    assert isinstance(input_config, InputConfig)
+
+    receiver_indices = input_config.receiver_config.indices
+
+    assert received_signals.shape == (len(receiver_indices), wavesim_duration)
+    assert input_config.tof_cropping
+
+    window_size = input_config.tof_crop_size
+    assert window_size is not None
+
+    sample_y *= wavesim_field_size
+    sample_x *= wavesim_field_size
+
+    c = wavesim_speed_of_sound
+
+    # HACK: only using middle emitter for now
+    assert input_config.emitter_config.indices == [2]
+    emitter_y, emitter_x = wavesim_emitter_locations[2]
+    distance_emitter_to_location = math.hypot(emitter_y - sample_y, emitter_x - sample_x)
+
+    windowed_signals = []
+
+    for signal_index, receiver_index in enumerate(receiver_indices):
+        receiver_y, receiver_x = wavesim_receiver_locations[receiver_index]
+        distance_location_to_receiver = math.hypot(receiver_y - sample_y, receiver_x - sample_x)
+
+        total_distance = distance_emitter_to_location + distance_location_to_receiver
+
+        expected_time_of_flight = total_distance / c
+
+        window_center = int(expected_time_of_flight)
+        window_start = window_center - window_size // 2
+        window_end = window_center + window_size // 2
+
+        start_padding_size = max(-window_start, 0)
+        end_padding_size = max(window_end - wavesim_duration, 0)
+        
+        window_start = max(window_start, 0)
+        window_end = min(window_end, wavesim_duration)
+
+        signal = received_signals[signal_index]
+        window = torch.cat((
+            torch.zeros(start_padding_size, device=signal.device),
+            signal[window_start:window_end],
+            torch.zeros(end_padding_size, device=signal.device)
+        ), dim=0)
+
+        windowed_signals.append(window)
+    
+    windowed_signals = torch.stack(windowed_signals, dim=0)
+
+    assert windowed_signals.shape == (len(receiver_indices), window_size)
+
+    return windowed_signals
+
+def crop_audio_from_location_batch(received_signals_batch, input_config, locations_yx_batch):
+    assert isinstance(received_signals_batch, torch.Tensor)
+    assert isinstance(input_config, InputConfig)
+    assert isinstance(locations_yx_batch, torch.Tensor)
+    B = received_signals_batch.shape[0]
+    assert received_signals_batch.shape == (B, len(input_config.receiver_config.indices), wavesim_duration)
+    assert locations_yx_batch.shape == (B, 2)
+    assert input_config.tof_cropping
+    assert input_config.tof_crop_size is not None
+    cropped = []
+    for b in range(B):
+        cropped.append(crop_audio_from_location(
+            received_signals_batch[b],
+            input_config,
+            locations_yx_batch[b, 0].item(),
+            locations_yx_batch[b, 1].item()
+        ))
+    cropped = torch.stack(cropped, dim=0)
+    assert cropped.shape == (B, len(input_config.receiver_config.indices), input_config.tof_crop_size)
+    return cropped

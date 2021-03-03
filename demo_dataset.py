@@ -1,6 +1,6 @@
 import fix_dead_command_line
 
-from dataset_config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
+from config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
 import matplotlib.pyplot as plt
 import numpy as np
 

@@ -3,7 +3,7 @@ import fix_dead_command_line
 from visualization import plot_ground_truth, plot_inputs, plot_prediction, plt_screenshot
 import os
 from loss_functions import compute_loss_on_dataset, meanAndVarianceLoss, meanSquaredErrorLoss
-from dataset_config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
+from config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
@@ -47,6 +47,8 @@ def main():
     parser.add_argument("--importancesampling", dest="importancesampling", default=False, action="store_true")
     parser.add_argument("--predictvariance", dest="predictvariance", default=False, action="store_true")
     parser.add_argument("--resolution", type=int, dest="resolution", default=128)
+    parser.add_argument("--tofcropping", dest="tofcropping", default=False, action="store_true")
+    parser.add_argument("--tofwindowsize", type=int, dest="tofwindowsize", choices=[64, 128, 256, 512, 1024], default=None)
     parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram", "gccphat"], required=True)
     parser.add_argument("--nnoutput", type=str, dest="nnoutput", choices=["sdf", "heatmap", "depthmap"], required=True)
     parser.add_argument("--summarystatistics", dest="summarystatistics", default=False, action="store_true")
@@ -55,6 +57,8 @@ def main():
     parser.add_argument("--restoremodelpath", type=str, dest="restoremodelpath", default=None)
 
     args = parser.parse_args()
+
+    assert args.tofcropping == (args.tofwindowsize is not None)
 
     if args.nodisplay:
         matplotlib.use("Agg")
@@ -79,6 +83,7 @@ def main():
         emitter_config=emitter_config,
         receiver_config=receiver_config,
         summary_statistics=args.summarystatistics,
+        tof_crop_size=args.tofwindowsize,
         using_echo4ch=using_echo4ch
     )
 
@@ -86,6 +91,7 @@ def main():
         format=args.nnoutput,
         implicit=args.implicitfunction,
         predict_variance=args.predictvariance,
+        tof_cropping=args.tofcropping,
         resolution=args.resolution,
         using_echo4ch=using_echo4ch
     )

@@ -13,7 +13,7 @@ from argparse import ArgumentParser
 
 from the_device import the_device
 from wave_field import Field
-from dataset_config import wavesim_field_size, wavesim_duration, wavesim_emitter_locations, wavesim_receiver_locations
+from config import wavesim_field_size, wavesim_duration, wavesim_emitter_locations, wavesim_receiver_locations
 from progress_bar import progress_bar
 
 def main():

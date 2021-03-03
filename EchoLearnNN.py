@@ -1,8 +1,9 @@
+from featurize_audio import crop_audio_from_location_batch
 from device_dict import DeviceDict
 import torch
 import torch.nn as nn
 
-from dataset_config import InputConfig, OutputConfig
+from config import InputConfig, OutputConfig
 from reshape_layer import Reshape
 from permute_layer import Permute
 from log_layer import Log
@@ -92,6 +93,18 @@ class EchoLearnNN(nn.Module):
             )
             intermediate_width=32
             intermediate_channels=4*32
+        elif self._input_config.tof_cropping:
+            assert not self._input_config.using_echo4ch
+            self.convIn = nn.Sequential(
+                makeConvDown(channels_in, 16, dims_in),
+                makeConvDown(16, 16, dims_in),
+                makeConvDown(16, 32, dims_in),
+                makeConvDown(32, 64, dims_in),
+                makeConvDown(64, 64, dims_in),
+                Reshape((64,8), (64,8)) # safety check
+            )
+            intermediate_width=8
+            intermediate_channels=64
         elif self._input_config.format == "spectrogram":
             assert not self._input_config.using_echo4ch
             self.convIn = nn.Sequential(
@@ -133,7 +146,7 @@ class EchoLearnNN(nn.Module):
             makeFullyConnected(128, 512)
         )
 
-        if self._output_config.implicit:
+        if self._output_config.implicit or self._output_config.tof_cropping:
             self.final = makeFullyConnected(512, channels_out, activation=False)
         elif dims_out == 1:
             assert self._output_config.resolution >= 16
@@ -189,6 +202,11 @@ class EchoLearnNN(nn.Module):
         
         B = w0.shape[0]
 
+        if self._input_config.tof_cropping:
+            locations_yx = d['params']
+            assert locations_yx.shape == (B, 2)
+            w0 = crop_audio_from_location_batch(w0, self._input_config, locations_yx)
+
         wx = self.convIn(w0)
 
         assert len(wx.shape) == 3
@@ -224,7 +242,11 @@ class EchoLearnNN(nn.Module):
         out_channels = self._output_config.num_channels
         num_params = self._output_config.num_implicit_params
 
-        if self._output_config.implicit:
+        if self._output_config.tof_cropping:
+            v0 = self.fullyConnected(fc_input)
+            output = self.final(v0)
+            assert output.shape == (B, out_channels)
+        elif self._output_config.implicit:
             implicit_params = d['params']
             
             assert len(implicit_params.shape) == 3

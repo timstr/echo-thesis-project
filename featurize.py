@@ -1,5 +1,5 @@
 from EchoLearnNN import EchoLearnNN
-from dataset_config import OutputConfig
+from config import OutputConfig, wavesim_duration
 import torch
 import math
 import numpy as np
@@ -9,29 +9,6 @@ import itertools
 from shape_types import CIRCLE, RECTANGLE
 from the_device import the_device, what_my_gpu_can_handle
 from device_dict import DeviceDict
-
-# TODO:
-# - spectrogram
-# - ?
-
-# For old simulation (datasets version 1 to 5)
-# magic_speed_of_sound = 1.0 / 1050.0
-
-# For dataset version 6+
-magic_speed_of_sound = 1.0 / 200.0
-
-dataset_field_size = 512
-
-position_negative = (dataset_field_size // 2 - 10) / dataset_field_size
-position_positive = (dataset_field_size // 2 + 10) / dataset_field_size
-
-receiver_locations = [
-    (position_negative, position_negative),
-    (position_negative, position_positive),
-    (position_positive, position_negative),
-    (position_positive, position_positive)
-]
-
 
 def all_yx_locations(size):
     ls = torch.linspace(0, 1, size).to(the_device)
@@ -467,7 +444,6 @@ def make_heatmap_image_gt(example, img_size):
 
     coordinates_yx = all_yx_locations(img_size)
 
-    # return heatmap_batch(coordinates_yx, obs).reshape(img_size, img_size)
     return torch.clamp(img_size * -sdf_batch(coordinates_yx, obs), 0.0, 1.0).reshape(img_size, img_size)
 
 def make_depthmap_gt(example, img_size):
@@ -510,6 +486,46 @@ def make_echo4ch_dense_implicit_output_pred(example, network, output_config):
         return make_echo4ch_heatmap_volume_pred(example, res, network, num_splits, var)
     else:
         raise Exception("Unrecognized output representation")
+
+def make_dense_tof_cropped_output_pred(example, network, output_config):
+    assert isinstance(example, DeviceDict)
+    assert isinstance(network, EchoLearnNN)
+    assert isinstance(output_config, OutputConfig)
+    assert output_config.tof_cropping
+    assert output_config.dims == 2
+
+    res = output_config.resolution
+    predict_variance = output_config.predict_variance
+
+    num_splits = max(res**2 // what_my_gpu_can_handle, 1)
+
+    num_output_dims = 2 if predict_variance else 1
+    num_samples = res**2
+    outputs = torch.zeros(num_samples, num_output_dims)
+    assert (num_samples % num_splits) == 0
+    split_size = num_samples // num_splits
+
+    xy_locations = all_yx_locations(res).permute(1, 0)
+    assert xy_locations.shape == (num_samples, 2)
+
+    input_batch_of_one = example["input"][:1]
+    assert len(input_batch_of_one.shape) == 3
+    assert input_batch_of_one.shape[2] == wavesim_duration
+
+    d = DeviceDict({
+        "input": input_batch_of_one.repeat(split_size, 1, 1),
+    })
+
+    for i in range(num_splits):
+        begin = i * split_size
+        end = (i + 1) * split_size
+        d["params"] = xy_locations[:, begin:end]
+        pred = network(d)["output"]
+        assert pred.shape == (split_size, num_output_dims)
+        outputs[begin:end, :] = pred.detach()
+        pred = None
+
+    return outputs.permute(1, 0).reshape(num_output_dims, res, res).detach().cpu()   
 
 def make_dense_implicit_output_pred(example, network, output_config):
     assert isinstance(example, DeviceDict)
@@ -655,8 +671,10 @@ def make_implicit_params_validation(img_size, dims):
             dim=2
         ).to(the_device).reshape(1, img_size**2, 2)
     elif dims == 3:
-        # HACK: Not as "accurate" as the above methods which evaluate at each and every point, but I just don't have the patience for doing so in 3D
-        return torch.rand((1, img_size**2, 3)).to(the_device)
+        return torch.stack(
+            torch.meshgrid((ls, ls, ls)),
+            dim=2
+        ).to(the_device).reshape(1, img_size**3, 3)
 
 def make_implicit_outputs(obs, params, representation):
     assert len(params.shape) == 2
