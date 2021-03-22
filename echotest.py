@@ -12,6 +12,7 @@ from featurize import make_dense_implicit_output_pred
 from custom_collate_fn import custom_collate
 from device_dict import DeviceDict
 from dataset import WaveSimDataset
+from Echo4ChDataset import Echo4ChDataset
 from config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
 from EchoLearnNN import EchoLearnNN
 from the_device import the_device
@@ -25,6 +26,7 @@ def main():
     parser.add_argument("--description", type=str, dest="description", required=True)
     # parser.add_argument("--batchsize", type=int, dest="batchsize", default=4)
     parser.add_argument("--nodisplay", dest="nodisplay", default=False, action="store_true")
+    parser.add_argument("--dataset", type=str, choices=["wavesim", "echo4ch"], dest="dataset", default="wavesim")
 
     parser.add_argument("--receivercount", type=int, choices=[1, 2, 4, 8, 16, 32, 64], dest="receivercount", required=True)
     parser.add_argument("--receiverarrangement", type=str, choices=["flat", "grid"], dest="receiverarrangement", required=True)
@@ -44,9 +46,17 @@ def main():
     parser.add_argument("--makeimages", dest="makeimages", default=False, action="store_true")
     parser.add_argument("--computemetrics", dest="computemetrics", default=False, action="store_true")
     parser.add_argument("--occupancyshadows", dest="occupancyshadows", default=False, action="store_true")
+
+    parser.add_argument("--tofcropping", type=realbool, dest="tofcropping", required=True)
+    parser.add_argument("--tofwindowsize", type=int, dest="tofwindowsize", choices=[64, 128, 256, 512, 1024], default=None)
     
     args = parser.parse_args()
     
+    assert args.tofcropping == (args.tofwindowsize is not None)
+
+    dataset_name = args.dataset
+    using_echo4ch = (dataset_name == "echo4ch")
+
     if args.nodisplay:
         matplotlib.use("Agg")
 
@@ -66,14 +76,18 @@ def main():
         format=args.nninput,
         emitter_config=emitter_config,
         receiver_config=receiver_config,
-        summary_statistics=args.summarystatistics
+        summary_statistics=args.summarystatistics,
+        tof_crop_size=args.tofwindowsize,
+        using_echo4ch=using_echo4ch
     )
 
     output_config = OutputConfig(
         format=args.nnoutput,
         implicit=args.implicitfunction,
         predict_variance=args.predictvariance,
-        resolution=args.resolution
+        tof_cropping=args.tofcropping,
+        resolution=args.resolution,
+        using_echo4ch=using_echo4ch
     )
 
     training_config = TrainingConfig(
@@ -91,6 +105,7 @@ def main():
     assert shadows or (output_config.format != "depthmap")
 
     print("============== CONFIGURATIONS ==============")
+    print(f"Dataset: {args.dataset}")
     emitter_config.print()
     receiver_config.print()
     input_config.print()
@@ -99,17 +114,28 @@ def main():
     print("============================================")
     print("")
 
-    ecds = WaveSimDataset(
-        training_config,
-        input_config,
-        output_config,
-        emitter_config,
-        receiver_config
-    )
+    if dataset_name == "wavesim":
+        ds = WaveSimDataset(
+            training_config,
+            input_config,
+            output_config,
+            emitter_config,
+            receiver_config
+        )
+    elif dataset_name == "echo4ch":
+        ds = Echo4ChDataset(
+            training_config,
+            input_config,
+            output_config,
+            emitter_config,
+            receiver_config
+        )
+    else:
+        raise Exception(f"Unrecognized dataset type \"{dataset_name}\"")
 
     collate_fn_device = lambda batch : DeviceDict(custom_collate(batch))
     test_loader = torch.utils.data.DataLoader(
-        ecds,
+        ds,
         batch_size=1,
         num_workers=0,
         pin_memory=False,

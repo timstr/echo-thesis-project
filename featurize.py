@@ -395,6 +395,33 @@ def make_sdf_image_gt(example, img_size):
 
     return sdf_batch(coordinates_yx, obs).reshape(img_size, img_size)
 
+def smoothstep(edge0, edge1, x):
+    assert edge0 < edge1
+    t = torch.clamp((x - edge0) / (edge1 - edge0), min=0.0, max=1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+def inigo_quilez_sdf_colours(img):
+    # adapted from https://www.shadertoy.com/view/XdXcRB
+    assert len(img.shape) == 2
+    img = img.unsqueeze(2) * 2.0 # Lazy hack to make things appear more detailed
+    base_white = torch.tensor([[[1.0, 1.0, 1.0]]], dtype=torch.float, device=img.device)
+    base_mod = torch.tensor([[[0.1, 0.4, 0.7]]], dtype=torch.float, device=img.device)
+    col = base_white - torch.sign(img) * base_mod
+    col *= 1.0 - torch.exp(-2.0 * torch.abs(img))
+    col *= 0.8 + 0.2 * torch.cos(60.0 * img) # Note: changed from original 140.0 to make lines less dense
+    col = torch.lerp(col, base_white, 1.0 - smoothstep(0.0, 0.02, torch.abs(img)))
+    return col
+
+def blue_yellow(img):
+    assert len(img.shape) == 2
+    img = torch.clamp(img, min=0.0, max=1.0).unsqueeze(-1)
+    def colour(r, g, b):
+        return torch.tensor([r, g, b], dtype=torch.float, device=img.device).reshape(1, 1, 3)
+    blue = colour(0.0, 0.59, 1.0)
+    yellow = colour(1.0, 1.0, 0.0)
+    
+    return (1.0 - img) * blue + img * yellow
+
 def red_white_blue_banded(img):
     assert len(img.shape) == 2
     img = img * 5.0
@@ -402,12 +429,12 @@ def red_white_blue_banded(img):
     g = torch.clamp(1.0 - torch.abs(img), min=0.0, max=1.0)
     b = torch.clamp(-img + 1.0, min=0.0, max=1.0)
     x = 0.5 + img * 5.0
-    x = torch.clamp(1.0 * 5.0 * torch.abs(1.0 - 2.0 * (x - torch.floor(x))), min=0.0, max=1.0)
+    x = torch.clamp(1.0 * torch.abs(1.0 - 2.0 * (x - torch.floor(x))), min=0.0, max=1.0)
     rgb = torch.stack(
         (r, g, b),
         dim=2
     ) * (0.5 + 0.5 * x.unsqueeze(-1))
-    z = torch.clamp(1.0 - 50.0 * torch.abs(img), min=0.0, max=1.0).unsqueeze(-1)
+    z = torch.clamp(1.0 - 20.0 * torch.abs(img), min=0.0, max=1.0).unsqueeze(-1)
     z_color = torch.tensor([0.0, 0.5, 0.0], dtype=torch.float).unsqueeze(0).unsqueeze(0).to(img.device)
     rgb = rgb + (z_color - rgb) * z
     return rgb
@@ -519,7 +546,7 @@ def make_dense_tof_cropped_output_pred(example, network, output_config):
     for i in range(num_splits):
         begin = i * split_size
         end = (i + 1) * split_size
-        d["params"] = xy_locations[:, begin:end]
+        d["params"] = xy_locations[begin:end]
         pred = network(d)["output"]
         assert pred.shape == (split_size, num_output_dims)
         outputs[begin:end, :] = pred.detach()

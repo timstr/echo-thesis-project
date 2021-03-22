@@ -4,8 +4,8 @@ import numpy as np
 wavesim_field_size = 512
 wavesim_duration = 2048
 
-# TODO: measure this to see if it actually matches
-wavesim_speed_of_sound = math.sqrt(3 / 8)
+# Measured using `measure_speed_of_sound.py` at a size of 2048
+wavesim_speed_of_sound = 0.7804932396917319
 
 wavesim_emitter_locations = [
     (wavesim_field_size - 8, wavesim_field_size // 2 - 200), # 0 - ll

@@ -6,7 +6,7 @@ from device_dict import DeviceDict
 
 class SimpleNN(nn.Module):
     def __init__(self, input_config, output_config):
-        super().__init__()
+        super(SimpleNN, self).__init__()
         raise Exception("This code is currently undergoing maintenance and is not available. Please try again later.")
         # TODO
         self._num_implicit_params = num_implicit_params if num_implicit_params is not None else 0

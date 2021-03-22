@@ -5,10 +5,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from dataset import WaveSimDataset
-from featurize import make_depthmap_gt, make_heatmap_image_gt, make_sdf_image_gt, obstacles_occluded, red_white_blue_banded
+from featurize import make_depthmap_gt, make_heatmap_image_gt, make_sdf_image_gt, obstacles_occluded, inigo_quilez_sdf_colours
 
 def main():
-    tcfg = TrainingConfig()#max_examples=128)
+    tcfg = TrainingConfig(max_examples=128)
     ecfg = EmitterConfig()
     rcfg = ReceiverConfig()
     icfg = InputConfig(ecfg, rcfg, format="spectrogram")
@@ -16,7 +16,7 @@ def main():
 
     wsds = WaveSimDataset(tcfg, icfg, ocfg, ecfg, rcfg)
 
-    animate = True
+    animate = False
 
     if animate:
         plt.ion()
@@ -58,7 +58,7 @@ def main():
 
         # print("Obstacles signed distance field")
         plt.cla()
-        plt.imshow(red_white_blue_banded(make_sdf_image_gt(dummy_batch, 512)).cpu())
+        plt.imshow(inigo_quilez_sdf_colours(make_sdf_image_gt(dummy_batch, 512)).cpu())
         plt.show()
 
         # print("Impulse responses (waveforms)")

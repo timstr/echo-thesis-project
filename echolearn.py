@@ -291,9 +291,9 @@ def main():
                         
                     # plot the input waveforms
                     ax_t1.title.set_text("Input (train)")
-                    plot_inputs(ax_t1, batch_cpu, receiver_config)
+                    plot_inputs(ax_t1, batch_cpu, input_config)
                     ax_b1.title.set_text("Input (validation)")
-                    plot_inputs(ax_b1, val_batch_cpu, receiver_config)
+                    plot_inputs(ax_b1, val_batch_cpu, input_config)
                     
                     # plot the ground truth obstacles
                     ax_t2.title.set_text("Ground Truth (train)")

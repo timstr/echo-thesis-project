@@ -10,7 +10,7 @@ from log_layer import Log
 
 class EchoLearnNN(nn.Module):
     def __init__(self, input_config, output_config):
-        super().__init__()
+        super(EchoLearnNN, self).__init__()
 
         assert isinstance(input_config, InputConfig)
         assert isinstance(output_config, OutputConfig)
@@ -95,15 +95,16 @@ class EchoLearnNN(nn.Module):
             intermediate_channels=4*32
         elif self._input_config.tof_cropping:
             assert not self._input_config.using_echo4ch
+            expected_width_after_convs = self._input_config.tof_crop_size // 32
             self.convIn = nn.Sequential(
                 makeConvDown(channels_in, 16, dims_in),
                 makeConvDown(16, 16, dims_in),
                 makeConvDown(16, 32, dims_in),
                 makeConvDown(32, 64, dims_in),
                 makeConvDown(64, 64, dims_in),
-                Reshape((64,8), (64,8)) # safety check
+                Reshape((64,expected_width_after_convs), (64,expected_width_after_convs)) # safety check
             )
-            intermediate_width=8
+            intermediate_width=expected_width_after_convs
             intermediate_channels=64
         elif self._input_config.format == "spectrogram":
             assert not self._input_config.using_echo4ch
