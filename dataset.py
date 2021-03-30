@@ -73,17 +73,17 @@ class WaveSimDataset(torch.utils.data.Dataset):
             'input': the_input
         }
 
-        if self._output_config.tof_cropping:
-            assert self._input_config.tof_cropping
-            assert self._output_config.dims == 2
-            assert self._output_config.format in ["sdf", "heatmap"]
-            assert self._input_config.format in ["audioraw", "audiowaveshaped", "gccphat"]
+        # if self._output_config.tof_cropping:
+        #     assert self._input_config.tof_cropping
+        #     assert self._output_config.dims == 2
+        #     assert self._output_config.format in ["sdf", "heatmap"]
+        #     assert self._input_config.format in ["audioraw", "audiowaveshaped", "gccphat"]
 
-            sample_location_yx = torch.rand(2)
-            theDict['output'] = make_implicit_outputs(obstacles, sample_location_yx.unsqueeze(0), self._output_config.format).squeeze(0)
-            theDict['params'] = sample_location_yx
+        #     sample_location_yx = torch.rand(2)
+        #     theDict['output'] = make_implicit_outputs(obstacles, sample_location_yx.unsqueeze(0), self._output_config.format).squeeze(0)
+        #     theDict['params'] = sample_location_yx
             
-        elif self._output_config.implicit:
+        if self._output_config.implicit or self._output_config.tof_cropping:
             spe = self._training_config.samples_per_example
             params = make_implicit_params_train(spe, self._output_config.format)
             output = make_implicit_outputs(obstacles, params, self._output_config.format)

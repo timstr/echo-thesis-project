@@ -7,6 +7,7 @@ from config import InputConfig, OutputConfig
 from reshape_layer import Reshape
 from permute_layer import Permute
 from log_layer import Log
+from wavesim_params import wavesim_duration
 
 class EchoLearnNN(nn.Module):
     def __init__(self, input_config, output_config):
@@ -95,17 +96,15 @@ class EchoLearnNN(nn.Module):
             intermediate_channels=4*32
         elif self._input_config.tof_cropping:
             assert not self._input_config.using_echo4ch
-            expected_width_after_convs = self._input_config.tof_crop_size // 32
+            print("TODO: consider making TOF cropping convolutions wider")
             self.convIn = nn.Sequential(
-                makeConvDown(channels_in, 16, dims_in),
-                makeConvDown(16, 16, dims_in),
-                makeConvDown(16, 32, dims_in),
-                makeConvDown(32, 64, dims_in),
-                makeConvDown(64, 64, dims_in),
-                Reshape((64,expected_width_after_convs), (64,expected_width_after_convs)) # safety check
+                makeConvSame(1, 8, 3, dims_in),
+                makeConvSame(8, 16, 3, dims_in),
+                makeConvSame(16, 16, 3, dims_in),
+                Reshape((16, wavesim_duration), (16, wavesim_duration)) # safety check
             )
-            intermediate_width=expected_width_after_convs
-            intermediate_channels=64
+            intermediate_width=self._input_config.tof_crop_size
+            intermediate_channels=16 * self._input_config.num_channels
         elif self._input_config.format == "spectrogram":
             assert not self._input_config.using_echo4ch
             self.convIn = nn.Sequential(
@@ -204,17 +203,32 @@ class EchoLearnNN(nn.Module):
         B = w0.shape[0]
 
         if self._input_config.tof_cropping:
-            locations_yx = d['params']
-            assert locations_yx.shape == (B, 2)
-            w0 = crop_audio_from_location_batch(w0, self._input_config, locations_yx)
-
-        wx = self.convIn(w0)
-
-        assert len(wx.shape) == 3
+            channels_lifted_to_batch_dim = w0.reshape(
+                B * self._input_config.num_channels,
+                1,
+                wavesim_duration
+            )
+            conved = self.convIn(channels_lifted_to_batch_dim)
+            wx = conved.reshape(B, self._input_config.num_channels, -1, wavesim_duration)
+        else:
+            wx = self.convIn(w0)
 
         F = wx.shape[1]
         N = wx.shape[2]
 
+        if self._input_config.tof_cropping:
+            locations_yx = d['params']
+            assert len(locations_yx.shape) == 3
+            param_batch_size = locations_yx.shape[1]
+            assert locations_yx.shape == (B, param_batch_size, 2)
+
+            locations_yx_flat = locations_yx.reshape(B * param_batch_size, 2)
+            wx_repeated = wx.repeat_interleave(param_batch_size, dim=0)
+            assert wx_repeated.shape[0] == B * param_batch_size
+            assert wx_repeated.shape[1:] == wx.shape[1:]
+
+            inputs = crop_audio_from_location_batch(wx_repeated, self._input_config, locations_yx_flat)
+            inputs_flat = inputs.reshape(B * param_batch_size, -1)
         if self._input_config.summary_statistics:
             ls = torch.linspace(0.0, 1.0, N).unsqueeze(0).unsqueeze(0).to(wx.device)
             wx += 0.01
@@ -244,9 +258,11 @@ class EchoLearnNN(nn.Module):
         num_params = self._output_config.num_implicit_params
 
         if self._output_config.tof_cropping:
-            v0 = self.fullyConnected(fc_input)
-            output = self.final(v0)
-            assert output.shape == (B, out_channels)
+            v0 = self.fullyConnected(inputs_flat)
+            outputs_flat = self.final(v0)
+            output = outputs_flat.reshape(B, param_batch_size, out_channels)
+            output = output.permute(0, 2, 1)
+            assert output.shape == (B, out_channels, param_batch_size)
         elif self._output_config.implicit:
             implicit_params = d['params']
             

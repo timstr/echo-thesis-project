@@ -547,41 +547,29 @@ def make_dense_tof_cropped_output_pred(example, network, output_config):
     assert isinstance(example, DeviceDict)
     assert isinstance(network, EchoLearnNN)
     assert isinstance(output_config, OutputConfig)
-    assert output_config.tof_cropping
-    assert output_config.dims == 2
 
     res = output_config.resolution
     predict_variance = output_config.predict_variance
 
-    num_splits = max(res**2 // what_my_gpu_can_handle, 1)
-
-    num_output_dims = 2 if predict_variance else 1
     num_samples = res**2
-    outputs = torch.zeros(num_samples, num_output_dims)
+    num_splits = max(1, num_samples // (what_my_gpu_can_handle // 16))
+    num_dims = 2 if predict_variance else 1
+    outputs = torch.zeros(num_dims, num_samples)
     assert (num_samples % num_splits) == 0
     split_size = num_samples // num_splits
-
-    xy_locations = all_yx_locations(res).permute(1, 0)
-    assert xy_locations.shape == (num_samples, 2)
-
-    input_batch_of_one = example["input"][:1]
-    assert len(input_batch_of_one.shape) == 3
-    assert input_batch_of_one.shape[2] == wavesim_duration
-
+    xy_locations = all_yx_locations(res).permute(1, 0).unsqueeze(0)
     d = DeviceDict({
-        "input": input_batch_of_one.repeat(split_size, 1, 1),
+        "input": example["input"][:1],
     })
-
     for i in range(num_splits):
         begin = i * split_size
         end = (i + 1) * split_size
-        d["params"] = xy_locations[begin:end]
+        d["params"] = xy_locations[:, begin:end]
         pred = network(d)["output"]
-        assert pred.shape == (split_size, num_output_dims)
-        outputs[begin:end, :] = pred.detach()
+        assert pred.shape == (1, num_dims, split_size)
+        outputs[:, begin:end] = pred.reshape(num_dims, split_size).detach()
         pred = None
-
-    return outputs.permute(1, 0).reshape(num_output_dims, res, res).detach().cpu()   
+    return outputs.reshape(num_dims, res, res).detach().cpu()
 
 def make_dense_implicit_output_pred(example, network, output_config):
     assert isinstance(example, DeviceDict)

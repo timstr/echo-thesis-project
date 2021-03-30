@@ -94,7 +94,8 @@ def crop_audio_from_location(received_signals, input_config, sample_y, sample_x)
 
     receiver_indices = input_config.receiver_config.indices
 
-    assert received_signals.shape == (len(receiver_indices), wavesim_duration)
+    feature_channels = received_signals.shape[1]
+    assert received_signals.shape == (len(receiver_indices), feature_channels, wavesim_duration)
     assert input_config.tof_cropping
 
     window_size = input_config.tof_crop_size
@@ -102,8 +103,6 @@ def crop_audio_from_location(received_signals, input_config, sample_y, sample_x)
 
     sample_y *= wavesim_field_size
     sample_x *= wavesim_field_size
-
-    c = wavesim_speed_of_sound
 
     # HACK: only using middle emitter for now
     assert input_config.emitter_config.indices == [2]
@@ -118,7 +117,7 @@ def crop_audio_from_location(received_signals, input_config, sample_y, sample_x)
 
         total_distance = distance_emitter_to_location + distance_location_to_receiver
 
-        expected_time_of_flight = total_distance / c
+        expected_time_of_flight = total_distance / wavesim_speed_of_sound
 
         window_center = int(expected_time_of_flight)
         window_start = window_center - window_size // 2
@@ -132,16 +131,16 @@ def crop_audio_from_location(received_signals, input_config, sample_y, sample_x)
 
         signal = received_signals[signal_index]
         window = torch.cat((
-            torch.zeros(start_padding_size, device=signal.device),
-            signal[window_start:window_end],
-            torch.zeros(end_padding_size, device=signal.device)
-        ), dim=0)
+            torch.zeros((feature_channels, start_padding_size), device=signal.device),
+            signal[:, window_start:window_end],
+            torch.zeros((feature_channels, end_padding_size), device=signal.device)
+        ), dim=1)
 
         windowed_signals.append(window)
     
     windowed_signals = torch.stack(windowed_signals, dim=0)
 
-    assert windowed_signals.shape == (len(receiver_indices), window_size)
+    assert windowed_signals.shape == (len(receiver_indices), feature_channels, window_size)
 
     return windowed_signals
 
@@ -150,7 +149,8 @@ def crop_audio_from_location_batch(received_signals_batch, input_config, locatio
     assert isinstance(input_config, InputConfig)
     assert isinstance(locations_yx_batch, torch.Tensor)
     B = received_signals_batch.shape[0]
-    assert received_signals_batch.shape == (B, len(input_config.receiver_config.indices), wavesim_duration)
+    C = received_signals_batch.shape[2]
+    assert received_signals_batch.shape == (B, len(input_config.receiver_config.indices), C, wavesim_duration)
     assert locations_yx_batch.shape == (B, 2)
     assert input_config.tof_cropping
     assert input_config.tof_crop_size is not None
@@ -163,5 +163,5 @@ def crop_audio_from_location_batch(received_signals_batch, input_config, locatio
             locations_yx_batch[b, 1].item()
         ))
     cropped = torch.stack(cropped, dim=0)
-    assert cropped.shape == (B, len(input_config.receiver_config.indices), input_config.tof_crop_size)
+    assert cropped.shape == (B, len(input_config.receiver_config.indices), C, input_config.tof_crop_size)
     return cropped
