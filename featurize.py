@@ -412,6 +412,35 @@ def inigo_quilez_sdf_colours(img):
     col = torch.lerp(col, base_white, 1.0 - smoothstep(0.0, 0.02, torch.abs(img)))
     return col
 
+def blue_orange_sdf_colours(img):
+    H, W = img.shape
+    img = img.unsqueeze(2)
+
+    def colour(r, g, b):
+        return torch.tensor([r, g, b], dtype=torch.float, device=img.device).reshape(1, 1, 3)
+    blue = colour(0.22, 0.33, 0.66)
+    orange = colour(0.93, 0.48, 0.10)
+    paler_blue = colour(0.50, 0.58, 0.82)
+    paler_orange = colour(0.93, 0.87, 0.28)
+    white = colour(1.0, 1.0, 1.0)
+
+    sign = torch.sign(img)
+
+    base_colour = blue * (0.5 - 0.5 * sign) + orange * (0.5 + 0.5 * sign)
+    paler_colour = paler_blue * (0.5 - 0.5 * sign) + paler_orange * (0.5 + 0.5 * sign)
+    mix = torch.exp(-4.0 * torch.abs(img))
+
+    out = base_colour + mix * (paler_colour - base_colour)
+
+    out *= 1.0 - 0.2 * torch.cos(60.0 * img)**4
+
+    out = torch.lerp(out, white, 1.0 - smoothstep(0.0, 0.02, torch.abs(img)))
+
+    return out
+
+def colourize_sdf(img):
+    return blue_orange_sdf_colours(img)
+
 def blue_yellow(img):
     assert len(img.shape) == 2
     img = torch.clamp(img, min=0.0, max=1.0).unsqueeze(-1)

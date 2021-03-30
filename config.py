@@ -79,7 +79,7 @@ class ReceiverConfig:
 
 class InputConfig:
     def __init__(self, emitter_config, receiver_config, format="spectrogram", summary_statistics=True, using_echo4ch=False, tof_crop_size=None):
-        assert format in ["audioraw", "audiowaveshaped", "spectrogram", "gccphat"]
+        assert format in ["audioraw", "audiowaveshaped", "spectrogram", "gcc", "gccphat"]
         assert isinstance(emitter_config, EmitterConfig)
         assert isinstance(receiver_config, ReceiverConfig)
         assert tof_crop_size is None or isinstance(tof_crop_size, int)

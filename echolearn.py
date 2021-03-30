@@ -49,7 +49,7 @@ def main():
     parser.add_argument("--resolution", type=int, dest="resolution", default=128)
     parser.add_argument("--tofcropping", dest="tofcropping", default=False, action="store_true")
     parser.add_argument("--tofwindowsize", type=int, dest="tofwindowsize", choices=[64, 128, 256, 512, 1024], default=None)
-    parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram", "gccphat"], required=True)
+    parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram", "gcc", "gccphat"], required=True)
     parser.add_argument("--nnoutput", type=str, dest="nnoutput", choices=["sdf", "heatmap", "depthmap"], required=True)
     parser.add_argument("--summarystatistics", dest="summarystatistics", default=False, action="store_true")
     parser.add_argument("--plotinterval", type=int, dest="plotinterval", default=32)
@@ -107,7 +107,8 @@ def main():
 
 
     print("============== CONFIGURATIONS ==============")
-    print(f"Dataset: {args.dataset}")
+    print(f"Dataset    : {args.dataset}")
+    print(f"batch size : {args.batchsize}")
     emitter_config.print()
     receiver_config.print()
     input_config.print()

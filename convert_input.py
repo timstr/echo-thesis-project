@@ -3,7 +3,7 @@ import torch
 
 from wavesim_params import wavesim_duration
 from config import EmitterConfig, ReceiverConfig, InputConfig
-from featurize_audio import sclog, make_spectrogram, make_gcc_phat
+from featurize_audio import sclog, make_spectrogram, make_gcc
 
 
 def combine_emitted_signals(impulse_responses, emitter_config, receiver_config):
@@ -40,7 +40,9 @@ def transform_received_signals(received_signals, input_config):
         return sclog(received_signals)
     elif input_config.format == "spectrogram":
         return make_spectrogram(received_signals)
+    elif input_config.format == "gcc":
+        return make_gcc(input_config.emitted_signal, received_signals, transform=None)
     elif input_config.format == "gccphat":
-        return make_gcc_phat(input_config.emitted_signal, received_signals)
+        return make_gcc(input_config.emitted_signal, received_signals, transform="phat")
     else:
         raise Exception(f"Unrecognized input format: '{input_config.format}'")

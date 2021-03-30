@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from dataset import WaveSimDataset
-from featurize import make_depthmap_gt, make_heatmap_image_gt, make_sdf_image_gt, obstacles_occluded, inigo_quilez_sdf_colours
+from featurize import make_depthmap_gt, make_heatmap_image_gt, make_sdf_image_gt, obstacles_occluded, colourize_sdf
 
 def main():
     tcfg = TrainingConfig(max_examples=128)
@@ -58,7 +58,7 @@ def main():
 
         # print("Obstacles signed distance field")
         plt.cla()
-        plt.imshow(inigo_quilez_sdf_colours(make_sdf_image_gt(dummy_batch, 512)).cpu())
+        plt.imshow(colourize_sdf(make_sdf_image_gt(dummy_batch, 512)).cpu())
         plt.show()
 
         # print("Impulse responses (waveforms)")

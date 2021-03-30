@@ -7,7 +7,7 @@ import PIL.Image
 from device_dict import DeviceDict
 from config import InputConfig, OutputConfig
 from EchoLearnNN import EchoLearnNN
-from featurize import make_dense_implicit_output_pred, make_dense_tof_cropped_output_pred, make_depthmap_gt, make_echo4ch_dense_implicit_output_pred, make_heatmap_image_gt, make_sdf_image_gt, purple_yellow, inigo_quilez_sdf_colours, blue_yellow
+from featurize import make_dense_implicit_output_pred, make_dense_tof_cropped_output_pred, make_depthmap_gt, make_echo4ch_dense_implicit_output_pred, make_heatmap_image_gt, make_sdf_image_gt, purple_yellow, colourize_sdf, blue_yellow
 
 def plot_inputs(plt_axis, batch, input_config):
     assert isinstance(batch, DeviceDict)
@@ -90,7 +90,7 @@ def plot_ground_truth(plt_axis, batch, output_config, show_samples=False):
             return
         if output_config.format == "sdf":
             img = make_sdf_image_gt(batch, output_config.resolution).cpu()
-            plt_axis.imshow(inigo_quilez_sdf_colours(img), interpolation="bicubic")
+            plt_axis.imshow(colourize_sdf(img), interpolation="bicubic")
             plt_axis.axis("off")
             if show_samples and output_config.implicit:
                 yx = batch["params"][0].detach() * output_config.resolution
@@ -203,7 +203,7 @@ def plot_prediction(plt_axis, batch, network, output_config):
             output = network(batch)['output'][0].detach().cpu()
 
         if output_config.format == "sdf":
-            plot_image(plt_axis, output, inigo_quilez_sdf_colours, output_config)
+            plot_image(plt_axis, output, colourize_sdf, output_config)
         elif output_config.format == "heatmap":
             plot_image(plt_axis, output, blue_yellow, output_config)
         elif output_config.format == "depthmap":

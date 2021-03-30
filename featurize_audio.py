@@ -34,7 +34,11 @@ def make_spectrogram(audio_raw):
             out.append(make_spectrogram(audio_raw[i]))
         return np.array(out)
 
-def make_gcc_phat_single(original, echo):
+def make_gcc_single(original, echo, transform):
+    assert isinstance(original, np.ndarray) or isinstance(original, torch.Tensor)
+    assert isinstance(echo, np.ndarray) or isinstance(echo, torch.Tensor)
+    assert transform is None or transform == "phat"
+
     n = 2048 # Number of audio samples in dataset version 9
     assert original.shape == (n,)
     assert echo.shape == (n,)
@@ -42,17 +46,26 @@ def make_gcc_phat_single(original, echo):
     sig = np.fft.rfft(echo, n=n)
     refsig = np.fft.rfft(original, n=n)
     r = sig * np.conj(refsig)
-    cc = np.fft.irfft(r / np.abs(r), n=n)
+
+    if transform == "phat":
+        r /= np.abs(r)
+
+    cc = np.fft.irfft(r, n=n)
+
     assert cc.shape == (n,)
     return cc.astype("float32")
 
-def make_gcc_phat(original, echoes):
+def make_gcc(original, echoes, transform):
+    assert isinstance(original, np.ndarray) or isinstance(original, torch.Tensor)
+    assert isinstance(echoes, np.ndarray) or isinstance(echoes, torch.Tensor)
+    assert transform is None or transform == "phat"
+
     n = 2048 # Number of audio samples in dataset version 9
     assert original.shape == (n,)
     assert len(echoes.shape) == 2
     assert echoes.shape[1] == n
     res = np.stack([
-        make_gcc_phat_single(original, echo) for echo in echoes
+        make_gcc_single(original, echo, transform) for echo in echoes
     ], axis=0)
     assert res.shape == (echoes.shape[0], n)
     return res
