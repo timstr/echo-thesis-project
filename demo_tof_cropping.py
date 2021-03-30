@@ -16,7 +16,7 @@ def main():
     ecfg = EmitterConfig()
     rcfg = ReceiverConfig()
     # icfg = InputConfig(ecfg, rcfg, format="audioraw", tof_crop_size=256)
-    icfg = InputConfig(ecfg, rcfg, format="gccphat", tof_crop_size=256)
+    icfg = InputConfig(ecfg, rcfg, format="gcc", tof_crop_size=256)
     ocfg = OutputConfig(format="sdf")
 
     wsds = WaveSimDataset(tcfg, icfg, ocfg, ecfg, rcfg)
@@ -46,6 +46,8 @@ def main():
 
     dragging = False
 
+    stay_open = True
+
     def onclick(event):
         nonlocal sample_x
         nonlocal sample_y
@@ -68,12 +70,16 @@ def main():
             sample_x = event.xdata / res
             sample_y = event.ydata / res
 
+    def on_close(event):
+        nonlocal stay_open
+        stay_open = False
 
     cid_click = fig.canvas.mpl_connect('button_press_event', onclick)
     cid_release = fig.canvas.mpl_connect('button_release_event', onrelease)
     cid_move = fig.canvas.mpl_connect('motion_notify_event', onmove)
+    cid_close = fig.canvas.mpl_connect('close_event', on_close)
 
-    while True:
+    while stay_open:
         ax_l.cla()
         ax_r.cla()
 
@@ -113,7 +119,6 @@ def main():
 
         fig.canvas.draw()
         fig.canvas.flush_events()
-
 
 if __name__ == "__main__":
     main()
