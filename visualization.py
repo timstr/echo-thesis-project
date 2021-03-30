@@ -20,9 +20,7 @@ def plot_inputs(plt_axis, batch, input_config):
             # HACK
             location_y = 0.5
             location_x = 0.5
-            the_input_with_fake_feature_dim = the_input.unsqueeze(1)
-            the_input_cropped = crop_audio_from_location(the_input_with_fake_feature_dim, input_config, location_y, location_x)
-            the_input_cropped = the_input_cropped.squeeze(1)
+            the_input_cropped = crop_audio_from_location(the_input, input_config, location_y, location_x)
             for j in range(input_config.num_channels):
                 top = j / input_config.num_channels
                 bottom = (j + 1) / input_config.num_channels
