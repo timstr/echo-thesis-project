@@ -1,4 +1,9 @@
-from config import OutputConfig
+from config import (
+    OutputConfig,
+    output_format_depthmap,
+    output_format_heatmap,
+    output_format_sdf,
+)
 from featurize import make_dense_outputs
 import torch
 
@@ -56,12 +61,12 @@ def convert_depthmap_to_shadowed_occupancy(depthmap):
 
 def predicted_occupancy(tensor, output_config, shadowed):
     assert isinstance(output_config, OutputConfig)
-    if output_config.format == "depthmap":
+    if output_config.format == output_format_depthmap:
         assert shadowed
         return convert_depthmap_to_shadowed_occupancy(tensor)
-    elif output_config.format == "heatmap":
+    elif output_config.format == output_format_heatmap:
         o = convert_heatmap_to_occupancy(tensor)
-    elif output_config.format == "sdf":
+    elif output_config.format == output_format_sdf:
         o = convert_sdf_to_occupancy(tensor)
     else:
         raise Exception("Unrecognized output format")
@@ -71,7 +76,7 @@ def predicted_occupancy(tensor, output_config, shadowed):
 
 
 def ground_truth_occupancy(obstacles, size, shadowed):
-    sdf = make_dense_outputs(obstacles, "sdf", size)
+    sdf = make_dense_outputs(obstacles, output_format_sdf, size)
     o = convert_sdf_to_occupancy(sdf.unsqueeze(0).unsqueeze(0))
     if shadowed:
         return convert_occupancy_to_shadowed_occupancy(o)

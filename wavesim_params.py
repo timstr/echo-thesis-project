@@ -1,6 +1,16 @@
 import math
 import numpy as np
 
+from config import (
+    emitter_arrangement_all,
+    emitter_arrangement_mono,
+    emitter_arrangement_stereo,
+    emitter_arrangement_surround,
+    receiver_arrangement_all,
+    receiver_arrangement_flat,
+    receiver_arrangement_grid,
+)
+
 wavesim_field_size = 512
 wavesim_duration = 2048
 
@@ -28,12 +38,12 @@ wavesim_receiver_locations = [
 
 
 def make_emitter_indices(arrangement):
-    assert arrangement in ["mono", "stereo", "surround"]
-    if arrangement == "mono":
+    assert arrangement in emitter_arrangement_all
+    if arrangement == emitter_arrangement_mono:
         return [2]
-    elif arrangement == "stereo":
+    elif arrangement == emitter_arrangement_stereo:
         return [1, 3]
-    elif arrangement == "surround":
+    elif arrangement == emitter_arrangement_surround:
         return [0, 1, 2, 3, 4]
     else:
         raise Exception("Unrecognized emitter layout")
@@ -41,26 +51,26 @@ def make_emitter_indices(arrangement):
 
 def make_receiver_indices(num_receivers, arrangement):
     assert num_receivers in [1, 2, 4, 8]
-    assert arrangement in ["flat", "grid"]
+    assert arrangement in receiver_arrangement_all
 
     # if flat arrangement, then at most 4 receivers
-    assert arrangement != "flat" or num_receivers <= 4
+    assert arrangement != receiver_arrangement_flat or num_receivers <= 4
 
     # if grid arrangement, then at least 4 receivers
-    assert arrangement != "grid" or num_receivers >= 4
+    assert arrangement != receiver_arrangement_grid or num_receivers >= 4
 
     if num_receivers == 1:
-        assert arrangement == "flat"
+        assert arrangement == receiver_arrangement_flat
         return [1]
     elif num_receivers == 2:
-        assert arrangement == "flat"
+        assert arrangement == receiver_arrangement_flat
         return [1, 2]
-    elif num_receivers == 4 and arrangement == "flat":
+    elif num_receivers == 4 and arrangement == receiver_arrangement_flat:
         return [0, 1, 2, 3]
-    elif num_receivers == 4 and arrangement == "grid":
+    elif num_receivers == 4 and arrangement == receiver_arrangement_grid:
         return [1, 2, 5, 6]
     elif num_receivers == 8:
-        assert arrangement == "grid"
+        assert arrangement == receiver_arrangement_grid
         return [0, 1, 2, 3, 4, 5, 6, 7]
     else:
         raise Exception("Unrecognized receiver layout")

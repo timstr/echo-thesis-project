@@ -7,6 +7,9 @@ from config import (
     OutputConfig,
     ReceiverConfig,
     TrainingConfig,
+    input_format_audioraw,
+    input_format_gcc,
+    output_format_sdf,
 )
 import matplotlib.pyplot as plt
 import torch
@@ -20,9 +23,9 @@ def main():
     tcfg = TrainingConfig(max_examples=512)
     ecfg = EmitterConfig()
     rcfg = ReceiverConfig()
-    # icfg = InputConfig(ecfg, rcfg, format="audioraw", tof_crop_size=256)
-    icfg = InputConfig(ecfg, rcfg, format="gcc", tof_crop_size=256)
-    ocfg = OutputConfig(format="sdf")
+    # icfg = InputConfig(ecfg, rcfg, format=input_format_audioraw, tof_crop_size=256)
+    icfg = InputConfig(ecfg, rcfg, format=input_format_gcc, tof_crop_size=256)
+    ocfg = OutputConfig(format=output_format_sdf)
 
     wsds = WaveSimDataset(tcfg, icfg, ocfg, ecfg, rcfg)
 

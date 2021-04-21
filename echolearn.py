@@ -18,6 +18,14 @@ from config import (
     OutputConfig,
     ReceiverConfig,
     TrainingConfig,
+    input_format_all,
+    receiver_arrangement_all,
+    receiver_arrangement_grid,
+    emitter_format_all,
+    emitter_arrangement_mono,
+    emitter_arrangement_all,
+    emitter_format_sweep,
+    output_format_all,
 )
 import torch
 import torchvision
@@ -62,23 +70,23 @@ def main():
     parser.add_argument(
         "--receiverarrangement",
         type=str,
-        choices=["flat", "grid"],
+        choices=receiver_arrangement_all,
         dest="receiverarrangement",
-        default="grid",
+        default=receiver_arrangement_grid,
     )
     parser.add_argument(
         "--emitterarrangement",
         type=str,
-        choices=["mono", "stereo", "surround"],
+        choices=emitter_arrangement_all,
         dest="emitterarrangement",
-        default="mono",
+        default=emitter_arrangement_mono,
     )
     parser.add_argument(
         "--emittersignal",
         type=str,
-        choices=["impulse", "beep", "sweep"],
+        choices=emitter_format_all,
         dest="emittersignal",
-        default="sweep",
+        default=emitter_format_sweep,
     )
     parser.add_argument(
         "--emittersequential",
@@ -137,14 +145,14 @@ def main():
         "--nninput",
         type=str,
         dest="nninput",
-        choices=["audioraw", "audiowaveshaped", "spectrogram", "gcc", "gccphat"],
+        choices=input_format_all,
         required=True,
     )
     parser.add_argument(
         "--nnoutput",
         type=str,
         dest="nnoutput",
-        choices=["sdf", "heatmap", "depthmap"],
+        choices=output_format_all,
         required=True,
     )
     parser.add_argument(

@@ -11,6 +11,13 @@ from config import (
     ReceiverConfig,
     TrainingConfig,
     example_should_be_used,
+    output_format_depthmap,
+    output_format_sdf,
+    output_format_heatmap,
+    input_format_audioraw,
+    input_format_audiowaveshaped,
+    input_format_gcc,
+    input_format_gccphat,
 )
 from featurize import (
     make_implicit_params_train,
@@ -104,12 +111,15 @@ class WaveSimDataset(torch.utils.data.Dataset):
         if self._output_config.tof_cropping:
             assert self._input_config.tof_cropping
             assert self._output_config.dims == 2
-            assert self._output_config.format in ["sdf", "heatmap"]
+            assert self._output_config.format in [
+                output_format_sdf,
+                output_format_heatmap,
+            ]
             assert self._input_config.format in [
-                "audioraw",
-                "audiowaveshaped",
-                "gcc",
-                "gccphat",
+                input_format_audioraw,
+                input_format_audiowaveshaped,
+                input_format_gcc,
+                input_format_gccphat,
             ]
 
             sample_location_yx = torch.rand(2)
@@ -127,14 +137,14 @@ class WaveSimDataset(torch.utils.data.Dataset):
 
             if (
                 self._training_config.importance_sampling
-                and self._output_config.format != "depthmap"
+                and self._output_config.format != output_format_depthmap
             ):
                 # TODO: move this to a separate function for importance-sampled implicit location
                 def get_filter(x, params):
                     sdf = (
                         x
-                        if self._output_config == "sdf"
-                        else make_implicit_outputs(obstacles, params, "sdf")
+                        if self._output_config == output_format_sdf
+                        else make_implicit_outputs(obstacles, params, output_format_sdf)
                     )
                     return 0.1 + 0.9 * (
                         1.0 - torch.round(torch.clamp(torch.abs(10.0 * sdf), max=1.0))

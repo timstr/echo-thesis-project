@@ -3,7 +3,14 @@ from device_dict import DeviceDict
 import torch
 import torch.nn as nn
 
-from config import InputConfig, OutputConfig
+from config import (
+    InputConfig,
+    OutputConfig,
+    input_format_audioraw,
+    input_format_audiowaveshaped,
+    input_format_spectrogram,
+    input_format_gccphat,
+)
 from reshape_layer import Reshape
 from permute_layer import Permute
 from log_layer import Log
@@ -77,7 +84,7 @@ class EchoLearnNN(nn.Module):
         channels_out = self._output_config.num_channels
 
         if self._input_config.using_echo4ch:
-            assert self._input_config.format == "spectrogram"
+            assert self._input_config.format == input_format_spectrogram
             self.convIn = nn.Sequential(
                 makeConvDown(channels_in, 16, dims_in),
                 makeConvSame(16, 16, 3, dims_in),
@@ -100,7 +107,7 @@ class EchoLearnNN(nn.Module):
 
             # intermediate_width = self._input_config.tof_crop_size
             # intermediate_channels = self._input_config.num_channels
-        elif self._input_config.format == "spectrogram":
+        elif self._input_config.format == input_format_spectrogram:
             assert not self._input_config.using_echo4ch
             self.convIn = nn.Sequential(
                 makeConvDown(channels_in, 16, dims_in),
@@ -110,7 +117,11 @@ class EchoLearnNN(nn.Module):
             )
             intermediate_width = 32
             intermediate_channels = 32 * 5
-        elif self._input_config.format in ["audioraw", "audiowaveshaped", "gccphat"]:
+        elif self._input_config.format in [
+            input_format_audioraw,
+            input_format_audiowaveshaped,
+            input_format_gccphat,
+        ]:
             assert not self._input_config.using_echo4ch
             self.convIn = nn.Sequential(
                 makeConvDown(channels_in, 16, dims_in),

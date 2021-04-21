@@ -5,6 +5,12 @@ from config import (
     OutputConfig,
     ReceiverConfig,
     TrainingConfig,
+    emitter_arrangement_mono,
+    emitter_format_sweep,
+    receiver_arrangement_grid,
+    input_format_spectrogram,
+    output_format_depthmap,
+    output_format_heatmap,
 )
 import compress_pickle
 import torch
@@ -23,12 +29,6 @@ class Echo4ChDataset(torch.utils.data.Dataset):
         emitter_config,
         receiver_config,
     ):
-        """
-        output_representation : the representation of expected outputs, must be one of:
-                                * "sdf" - signed distance field
-                                * "heatmap" - binary heatmap
-                                * "depthmap" - line-of-sight distance, e.g. radarplot
-        """
         super(Echo4ChDataset).__init__()
 
         assert isinstance(training_config, TrainingConfig)
@@ -42,17 +42,20 @@ class Echo4ChDataset(torch.utils.data.Dataset):
         self._emitter_config = emitter_config
         self._receiver_config = receiver_config
 
-        assert self._emitter_config.arrangement == "mono"
-        assert self._emitter_config.format == "sweep"
+        assert self._emitter_config.arrangement == emitter_arrangement_mono
+        assert self._emitter_config.format == emitter_format_sweep
 
         # NOTE: technically the long- and short-window spectrograms are from the same 4 receivers, but this doesn't make a difference
         assert self._receiver_config.count == 8
-        assert self._receiver_config.arrangement == "grid"
+        assert self._receiver_config.arrangement == receiver_arrangement_grid
 
-        assert self._input_config.format == "spectrogram"
+        assert self._input_config.format == input_format_spectrogram
         assert self._input_config.num_channels == 8
 
-        assert self._output_config.format in ["depthmap", "heatmap"]
+        assert self._output_config.format in [
+            output_format_depthmap,
+            output_format_heatmap,
+        ]
         assert self._output_config.resolution == 64
 
         self._rootpath = os.environ.get("ECHO4CH_DATASET")
@@ -93,7 +96,9 @@ class Echo4ChDataset(torch.utils.data.Dataset):
         depthmap = torch.tensor(data["depthmap"], dtype=torch.float) / 255.0
 
         dense_output = (
-            occupancy if (self._output_config.format == "heatmap") else depthmap
+            occupancy
+            if (self._output_config.format == output_format_heatmap)
+            else depthmap
         )
 
         theDict = {

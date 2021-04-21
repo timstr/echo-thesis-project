@@ -7,23 +7,28 @@ from shape_types import CIRCLE
 emitter_beep_sweep_len = wavesim_duration // 16
 emitter_sequential_delay = wavesim_duration // 8
 
+emitter_format_beep = "beep"
+emitter_format_sweep = "sweep"
+emitter_format_impulse = "impulse"
+emitter_format_all = [emitter_format_beep, emitter_format_sweep, emitter_format_impulse]
+
 
 def make_emitter_signal(frequency_index, delay, format):
     assert frequency_index in range(5)
     assert delay < wavesim_duration
-    assert format in ["impulse", "beep", "sweep"]
+    assert format in emitter_format_all
     # frequency (relative to sampling frequency)
     freq = math.pow(2.0, frequency_index / 5.0) / 32.0  # pentatonic scale ftw
     sig_len = min(max(wavesim_duration - delay, 0), emitter_beep_sweep_len)
 
     out = np.zeros((wavesim_duration,))
     out_sig = out[delay : delay + sig_len]
-    if format == "impulse":
+    if format == emitter_format_impulse:
         out[delay] = 1.0
-    elif format == "beep":
+    elif format == emitter_format_beep:
         t = np.linspace(0.0, 2.0 * np.pi * sig_len, sig_len)
         out_sig[...] = 1.0 - 2.0 * np.round(0.5 + 0.5 * np.sin(t * freq))
-    elif format == "sweep":
+    elif format == emitter_format_sweep:
         p = 0.0
         for i, t in enumerate(np.linspace(0.0, 1.0, sig_len)):
             k = math.pow(2.0, 1.0 - 2.0 * t)
@@ -34,12 +39,26 @@ def make_emitter_signal(frequency_index, delay, format):
     return out
 
 
+emitter_arrangement_mono = "mono"
+emitter_arrangement_stereo = "stereo"
+emitter_arrangement_surround = "surround"
+emitter_arrangement_all = [
+    emitter_arrangement_mono,
+    emitter_arrangement_stereo,
+    emitter_arrangement_surround,
+]
+
+
 class EmitterConfig:
     def __init__(
-        self, arrangement="mono", format="sweep", sequential=False, sameFrequency=False
+        self,
+        arrangement=emitter_arrangement_mono,
+        format=emitter_format_sweep,
+        sequential=False,
+        sameFrequency=False,
     ):
-        assert arrangement in ["mono", "stereo", "surround"]
-        assert format in ["impulse", "beep", "sweep"]
+        assert arrangement in emitter_arrangement_all
+        assert format in emitter_format_all
         assert isinstance(sequential, bool)
         assert isinstance(sameFrequency, bool)
         self.arrangement = arrangement
@@ -66,14 +85,19 @@ class EmitterConfig:
         print(f"  same frequency?          : {self.sequential}")
 
 
+receiver_arrangement_flat = "flat"
+receiver_arrangement_grid = "grid"
+receiver_arrangement_all = [receiver_arrangement_flat, receiver_arrangement_grid]
+
+
 class ReceiverConfig:
-    def __init__(self, arrangement="grid", count=8):
+    def __init__(self, arrangement=receiver_arrangement_grid, count=8):
         assert (arrangement, count) in [
-            ("flat", 1),
-            ("flat", 2),
-            ("flat", 4),
-            ("grid", 4),
-            ("grid", 8),
+            (receiver_arrangement_flat, 1),
+            (receiver_arrangement_flat, 2),
+            (receiver_arrangement_flat, 4),
+            (receiver_arrangement_grid, 4),
+            (receiver_arrangement_grid, 8),
         ]
         self.arrangement = arrangement
         self.count = count
@@ -85,23 +109,31 @@ class ReceiverConfig:
         print(f"  count                    : {self.count}")
 
 
+input_format_audioraw = "audioraw"
+input_format_audiowaveshaped = "audiowaveshaped"
+input_format_spectrogram = "spectrogram"
+input_format_gcc = "gcc"
+input_format_gccphat = "gccphat"
+input_format_all = [
+    input_format_audioraw,
+    input_format_audiowaveshaped,
+    input_format_spectrogram,
+    input_format_gcc,
+    input_format_gccphat,
+]
+
+
 class InputConfig:
     def __init__(
         self,
         emitter_config,
         receiver_config,
-        format="spectrogram",
+        format=input_format_spectrogram,
         summary_statistics=True,
         using_echo4ch=False,
         tof_crop_size=None,
     ):
-        assert format in [
-            "audioraw",
-            "audiowaveshaped",
-            "spectrogram",
-            "gcc",
-            "gccphat",
-        ]
+        assert format in input_format_all
         assert isinstance(emitter_config, EmitterConfig)
         assert isinstance(receiver_config, ReceiverConfig)
         assert tof_crop_size is None or isinstance(tof_crop_size, int)
@@ -118,10 +150,10 @@ class InputConfig:
         self.tof_cropping = tof_crop_size is not None
         self.tof_crop_size = tof_crop_size
 
-        self.dims = 2 if (self.format in ["spectrogram"]) else 1
+        self.dims = 2 if (self.format in [input_format_spectrogram]) else 1
 
         if self.using_echo4ch:
-            assert self.format == "spectrogram"
+            assert self.format == input_format_spectrogram
             assert self.num_channels == 8
             assert not self.tof_cropping
 
@@ -135,17 +167,23 @@ class InputConfig:
         print(f"  time-of-flight crop size : {self.tof_crop_size}")
 
 
+output_format_depthmap = "depthmap"
+output_format_heatmap = "heatmap"
+output_format_sdf = "sdf"
+output_format_all = [output_format_depthmap, output_format_heatmap, output_format_sdf]
+
+
 class OutputConfig:
     def __init__(
         self,
-        format="sdf",
+        format=output_format_sdf,
         implicit=True,
         predict_variance=True,
         tof_cropping=False,
         resolution=1024,
         using_echo4ch=False,
     ):
-        assert format in ["depthmap", "heatmap", "sdf"]
+        assert format in output_format_all
         assert isinstance(implicit, bool)
         assert isinstance(predict_variance, bool)
         assert isinstance(using_echo4ch, bool)
@@ -160,11 +198,11 @@ class OutputConfig:
         self.using_echo4ch = using_echo4ch
 
         if using_echo4ch:
-            assert format != "sdf"
+            assert format != output_format_sdf
             assert resolution == 64
-            self.dims = 2 if format == "depthmap" else 3
+            self.dims = 2 if format == output_format_depthmap else 3
         else:
-            self.dims = 1 if format == "depthmap" else 2
+            self.dims = 1 if format == output_format_depthmap else 2
         self.num_implicit_params = 0 if not implicit else self.dims
         self.num_channels = 2 if predict_variance else 1
 

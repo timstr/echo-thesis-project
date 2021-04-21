@@ -1,5 +1,11 @@
 from EchoLearnNN import EchoLearnNN
-from config import OutputConfig, wavesim_duration
+from config import (
+    OutputConfig,
+    wavesim_duration,
+    output_format_sdf,
+    output_format_heatmap,
+    output_format_depthmap,
+)
 import torch
 import math
 import numpy as np
@@ -588,10 +594,10 @@ def make_echo4ch_dense_implicit_output_pred(example, network, output_config):
     res = output_config.resolution
     var = output_config.predict_variance
     assert res == 64
-    if output_config.format == "depthmap":
+    if output_config.format == output_format_depthmap:
         num_splits = res ** 2 // what_my_gpu_can_handle
         return make_echo4ch_depthmap_image_pred(example, res, network, num_splits, var)
-    elif output_config.format == "heatmap":
+    elif output_config.format == output_format_heatmap:
         num_splits = res ** 3 // what_my_gpu_can_handle
         return make_echo4ch_heatmap_volume_pred(example, res, network, num_splits, var)
     else:
@@ -648,13 +654,13 @@ def make_dense_implicit_output_pred(example, network, output_config):
     assert output_config.implicit
     res = output_config.resolution
     var = output_config.predict_variance
-    if output_config.format == "sdf":
+    if output_config.format == output_format_sdf:
         num_splits = res ** 2 // what_my_gpu_can_handle
         return make_sdf_image_pred(example, res, network, num_splits, var)
-    elif output_config.format == "heatmap":
+    elif output_config.format == output_format_heatmap:
         num_splits = res ** 2 // what_my_gpu_can_handle
         return make_heatmap_image_pred(example, res, network, num_splits, var)
-    elif output_config.format == "depthmap":
+    elif output_config.format == output_format_depthmap:
         return make_depthmap_pred(example, res, network)
     else:
         raise Exception("Unrecognized output representation")
@@ -810,7 +816,7 @@ def make_random_obstacles(max_num_obstacles=10, min_dist=0.05):
 
 
 def make_implicit_params_train(num, representation):
-    dim = 1 if (representation == "depthmap") else 2
+    dim = 1 if (representation == output_format_depthmap) else 2
     return torch.rand(num, dim)
 
 
@@ -835,13 +841,13 @@ def make_implicit_params_validation(img_size, dims):
 
 def make_implicit_outputs(obs, params, representation):
     assert len(params.shape) == 2
-    if representation == "sdf":
+    if representation == output_format_sdf:
         assert params.shape[1] == 2
         return sdf_batch(params.permute(1, 0), obs)
-    elif representation == "heatmap":
+    elif representation == output_format_heatmap:
         assert params.shape[1] == 2
         return heatmap_batch(params.permute(1, 0), obs)
-    elif representation == "depthmap":
+    elif representation == output_format_depthmap:
         assert params.shape[1] == 1
         return lines_of_sight_from_bottom_up(obs, params[:, 0])
     else:
@@ -850,13 +856,13 @@ def make_implicit_outputs(obs, params, representation):
 
 def make_dense_outputs(obs, representation, img_size):
     theDict = DeviceDict({"obstacles_list": [obs]})
-    if representation == "sdf":
+    if representation == output_format_sdf:
         output = make_sdf_image_gt(theDict, img_size)
         assert output.shape == (img_size, img_size)
-    elif representation == "heatmap":
+    elif representation == output_format_heatmap:
         output = make_heatmap_image_gt(theDict, img_size)
         assert output.shape == (img_size, img_size)
-    elif representation == "depthmap":
+    elif representation == output_format_depthmap:
         output = make_depthmap_gt(theDict, img_size)
         assert len(output.shape) == 1
         assert output.shape[0] == img_size

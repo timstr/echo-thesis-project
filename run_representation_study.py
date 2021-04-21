@@ -1,4 +1,5 @@
 import subprocess
+from config import output_format_sdf, output_format_heatmap, output_format_depthmap
 
 
 def run_process(representation, implicitfunction):
@@ -17,7 +18,11 @@ def run_process(representation, implicitfunction):
 
 
 def main():
-    for representation in ["sdf", "heatmap", "depthmap"]:
+    for representation in [
+        output_format_sdf,
+        output_format_heatmap,
+        output_format_depthmap,
+    ]:
         for implicitfunction in [False, True]:
             run_process(representation, implicitfunction)
 

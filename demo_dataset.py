@@ -6,6 +6,8 @@ from config import (
     OutputConfig,
     ReceiverConfig,
     TrainingConfig,
+    input_format_spectrogram,
+    output_format_sdf,
 )
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,8 +26,8 @@ def main():
     tcfg = TrainingConfig(max_examples=128)
     ecfg = EmitterConfig()
     rcfg = ReceiverConfig()
-    icfg = InputConfig(ecfg, rcfg, format="spectrogram")
-    ocfg = OutputConfig(format="sdf")
+    icfg = InputConfig(ecfg, rcfg, format=input_format_spectrogram)
+    ocfg = OutputConfig(format=output_format_sdf)
 
     wsds = WaveSimDataset(tcfg, icfg, ocfg, ecfg, rcfg)
 

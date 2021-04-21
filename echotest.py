@@ -19,6 +19,12 @@ from config import (
     OutputConfig,
     ReceiverConfig,
     TrainingConfig,
+    input_format_all,
+    receiver_arrangement_all,
+    emitter_format_all,
+    emitter_arrangement_all,
+    output_format_all,
+    output_format_depthmap,
 )
 from EchoLearnNN import EchoLearnNN
 from the_device import the_device
@@ -57,21 +63,21 @@ def main():
     parser.add_argument(
         "--receiverarrangement",
         type=str,
-        choices=["flat", "grid"],
+        choices=receiver_arrangement_all,
         dest="receiverarrangement",
         required=True,
     )
     parser.add_argument(
         "--emitterarrangement",
         type=str,
-        choices=["mono", "stereo", "surround"],
+        choices=emitter_arrangement_all,
         dest="emitterarrangement",
         required=True,
     )
     parser.add_argument(
         "--emittersignal",
         type=str,
-        choices=["impulse", "beep", "sweep"],
+        choices=emitter_format_all,
         dest="emittersignal",
         required=True,
     )
@@ -95,14 +101,14 @@ def main():
         "--nninput",
         type=str,
         dest="nninput",
-        choices=["audioraw", "audiowaveshaped", "spectrogram", "gccphat"],
+        choices=input_format_all,
         required=True,
     )
     parser.add_argument(
         "--nnoutput",
         type=str,
         dest="nnoutput",
-        choices=["sdf", "heatmap", "depthmap"],
+        choices=output_format_all,
         required=True,
     )
     parser.add_argument(
@@ -186,7 +192,7 @@ def main():
     shadows = args.occupancyshadows
 
     # If not occupancy shadows, then not depthmap
-    assert shadows or (output_config.format != "depthmap")
+    assert shadows or (output_config.format != output_format_depthmap)
 
     print("============== CONFIGURATIONS ==============")
     print(f"Dataset: {args.dataset}")

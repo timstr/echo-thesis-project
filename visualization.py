@@ -5,7 +5,13 @@ import torchvision
 import PIL.Image
 
 from device_dict import DeviceDict
-from config import InputConfig, OutputConfig
+from config import (
+    InputConfig,
+    OutputConfig,
+    output_format_sdf,
+    output_format_heatmap,
+    output_format_depthmap,
+)
 from EchoLearnNN import EchoLearnNN
 from featurize import (
     make_dense_implicit_output_pred,
@@ -60,13 +66,13 @@ def plot_dense_output_echo4ch(plt_axis, batch, output_config):
     assert isinstance(output_config, OutputConfig)
     assert output_config.using_echo4ch
     with torch.no_grad():
-        if output_config.format == "depthmap":
+        if output_config.format == output_format_depthmap:
             gt = batch["gt_depthmap"][0].detach().cpu()
             assert gt.shape == (64, 64)
             gt = 1.0 - gt  # To invert colours
             plt_axis.imshow(purple_yellow(gt), interpolation="bicubic")
             plt_axis.axis("off")
-        elif output_config.format == "heatmap":
+        elif output_config.format == output_format_heatmap:
             gt = batch["gt_heatmap"][0].detach().cpu()
             assert gt.shape == (64, 64, 64)
             img_grid = torchvision.utils.make_grid(
@@ -111,7 +117,7 @@ def plot_ground_truth(plt_axis, batch, output_config, show_samples=False):
         if output_config.using_echo4ch:
             plot_dense_output_echo4ch(plt_axis, batch, output_config)
             return
-        if output_config.format == "sdf":
+        if output_config.format == output_format_sdf:
             img = make_sdf_image_gt(batch, output_config.resolution).cpu()
             plt_axis.imshow(colourize_sdf(img), interpolation="bicubic")
             plt_axis.axis("off")
@@ -120,7 +126,7 @@ def plot_ground_truth(plt_axis, batch, output_config, show_samples=False):
                 plt_axis.scatter(yx[:, 1], yx[:, 0], s=1.0)
             if output_config.tof_cropping:
                 show_sampling_location(plt_axis, output_config)
-        elif output_config.format == "heatmap":
+        elif output_config.format == output_format_heatmap:
             img = make_heatmap_image_gt(batch, output_config.resolution).cpu()
             plt_axis.imshow(blue_yellow(img), interpolation="bicubic")
             plt_axis.axis("off")
@@ -129,7 +135,7 @@ def plot_ground_truth(plt_axis, batch, output_config, show_samples=False):
                 plt_axis.scatter(yx[:, 1], yx[:, 0], s=1.0)
             if output_config.tof_cropping:
                 show_sampling_location(plt_axis, output_config)
-        elif output_config.format == "depthmap":
+        elif output_config.format == output_format_depthmap:
             arr = make_depthmap_gt(batch, output_config.resolution).cpu()
             plt_axis.set_ylim(-0.5, 1.5)
             plt_axis.plot(arr)
@@ -175,7 +181,7 @@ def plot_image(plt_axis, img, display_fn, output_config, checkerboard_size=8):
 
 def plot_depthmap(plt_axis, data, output_config):
     assert isinstance(output_config, OutputConfig)
-    assert output_config.format == "depthmap"
+    assert output_config.format == output_format_depthmap
     with torch.no_grad():
         y = data[0]
         assert y.shape == (output_config.resolution,)
@@ -200,11 +206,11 @@ def plot_prediction(plt_axis, batch, network, output_config):
                 )
             else:
                 output = network(batch)["output"][0]
-            if output_config.format == "depthmap":
+            if output_config.format == output_format_depthmap:
                 output[0] = (
                     1.0 - output[0]
                 )  # To invert colours (purple is far, yellow (object) is near)
-            elif output_config.format == "heatmap":
+            elif output_config.format == output_format_heatmap:
                 assert output.shape == (output_config.num_channels, 64, 64, 64)
                 output_as_minibatch = output.permute(1, 0, 2, 3)
                 output_grid = torchvision.utils.make_grid(
@@ -220,7 +226,9 @@ def plot_prediction(plt_axis, batch, network, output_config):
                 output = output_grid
                 assert len(output.shape) == 3
             output = output.cpu().detach()
-            checkerboard_size = 2 if (output_config.format == "depthmap") else 8
+            checkerboard_size = (
+                2 if (output_config.format == output_format_depthmap) else 8
+            )
             plot_image(
                 plt_axis,
                 output,
@@ -237,11 +245,11 @@ def plot_prediction(plt_axis, batch, network, output_config):
         else:
             output = network(batch)["output"][0].detach().cpu()
 
-        if output_config.format == "sdf":
+        if output_config.format == output_format_sdf:
             plot_image(plt_axis, output, colourize_sdf, output_config)
-        elif output_config.format == "heatmap":
+        elif output_config.format == output_format_heatmap:
             plot_image(plt_axis, output, blue_yellow, output_config)
-        elif output_config.format == "depthmap":
+        elif output_config.format == output_format_depthmap:
             plot_depthmap(plt_axis, output, output_config)
         else:
             raise Exception("Unrecognized output representation")

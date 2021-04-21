@@ -2,7 +2,16 @@ import numpy as np
 import torch
 
 from wavesim_params import wavesim_duration
-from config import EmitterConfig, ReceiverConfig, InputConfig
+from config import (
+    EmitterConfig,
+    ReceiverConfig,
+    InputConfig,
+    input_format_audioraw,
+    input_format_audiowaveshaped,
+    input_format_spectrogram,
+    input_format_gcc,
+    input_format_gccphat,
+)
 from featurize_audio import sclog, make_spectrogram, make_gcc
 
 
@@ -38,15 +47,15 @@ def transform_received_signals(received_signals, input_config):
 
     received_signals = torch.tensor(received_signals, dtype=torch.float)
 
-    if input_config.format == "audioraw":
+    if input_config.format == input_format_audioraw:
         return received_signals
-    elif input_config.format == "audiowaveshaped":
+    elif input_config.format == input_format_audiowaveshaped:
         return sclog(received_signals)
-    elif input_config.format == "spectrogram":
+    elif input_config.format == input_format_spectrogram:
         return make_spectrogram(received_signals)
-    elif input_config.format == "gcc":
+    elif input_config.format == input_format_gcc:
         return make_gcc(input_config.emitted_signal, received_signals, transform=None)
-    elif input_config.format == "gccphat":
+    elif input_config.format == input_format_gccphat:
         return make_gcc(input_config.emitted_signal, received_signals, transform="phat")
     else:
         raise Exception(f"Unrecognized input format: '{input_config.format}'")
