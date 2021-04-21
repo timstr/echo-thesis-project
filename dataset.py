@@ -77,7 +77,7 @@ class WaveSimDataset(torch.utils.data.Dataset):
             assert self._input_config.tof_cropping
             assert self._output_config.dims == 2
             assert self._output_config.format in ["sdf", "heatmap"]
-            assert self._input_config.format in ["audioraw", "audiowaveshaped", "gccphat"]
+            assert self._input_config.format in ["audioraw", "audiowaveshaped", "gcc", "gccphat"]
 
             sample_location_yx = torch.rand(2)
             theDict['output'] = make_implicit_outputs(obstacles, sample_location_yx.unsqueeze(0), self._output_config.format).squeeze(0)

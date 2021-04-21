@@ -94,18 +94,17 @@ class EchoLearnNN(nn.Module):
             intermediate_width=32
             intermediate_channels=4*32
         elif self._input_config.tof_cropping:
-            assert not self._input_config.using_echo4ch
-            expected_width_after_convs = self._input_config.tof_crop_size // 32
             self.convIn = nn.Sequential(
-                makeConvDown(channels_in, 16, dims_in),
-                makeConvDown(16, 16, dims_in),
-                makeConvDown(16, 32, dims_in),
-                makeConvDown(32, 64, dims_in),
-                makeConvDown(64, 64, dims_in),
-                Reshape((64,expected_width_after_convs), (64,expected_width_after_convs)) # safety check
+                makeConvDown(channels_in, 16, dims=1, kernel_size=15),
+                makeConvDown(16, 32, kernel_size=16, dims=1),
+                makeConvDown(32, 64, kernel_size=16, dims=1),
+                Reshape((64,21), (64,21))
             )
-            intermediate_width=expected_width_after_convs
-            intermediate_channels=64
+            intermediate_width = 21
+            intermediate_channels = 64
+
+            # intermediate_width = self._input_config.tof_crop_size
+            # intermediate_channels = self._input_config.num_channels
         elif self._input_config.format == "spectrogram":
             assert not self._input_config.using_echo4ch
             self.convIn = nn.Sequential(
@@ -141,14 +140,19 @@ class EchoLearnNN(nn.Module):
         num_summary_stats = 4
         
         fc_inputs = (intermediate_channels * num_summary_stats) if self._input_config.summary_statistics else (intermediate_channels * intermediate_width)
+        fc_hidden = 128
+        fc_outputs = channels_out if self._output_config.tof_cropping else 512
 
         self.fullyConnected = nn.Sequential(
-            makeFullyConnected(fc_inputs + self._output_config.num_implicit_params, 128),
-            makeFullyConnected(128, 512)
+            makeFullyConnected(fc_inputs + self._output_config.num_implicit_params, fc_hidden),
+            makeFullyConnected(fc_hidden, fc_outputs, activation=False)
         )
 
-        if self._output_config.implicit or self._output_config.tof_cropping:
+        if self._output_config.implicit:
             self.final = makeFullyConnected(512, channels_out, activation=False)
+        elif self._output_config.tof_cropping:
+            # Hahahahaha
+            self.final = None
         elif dims_out == 1:
             assert self._output_config.resolution >= 16
             convsFlex = ()
@@ -207,6 +211,18 @@ class EchoLearnNN(nn.Module):
             locations_yx = d['params']
             assert locations_yx.shape == (B, 2)
             w0 = crop_audio_from_location_batch(w0, self._input_config, locations_yx)
+            
+            # w0_flat = w0.reshape(B, self._input_config.num_channels * self._input_config.tof_crop_size)
+            # output = self.fullyConnected(w0_flat)
+
+            conved = self.convIn(w0)
+            conved_flat = conved.reshape(B, -1)
+            
+            output = self.fullyConnected(conved_flat)
+
+            assert output.shape == (B, self._output_config.num_channels)
+            output = self.scale_variance(output)
+            return DeviceDict({'output': output})
 
         wx = self.convIn(w0)
 
@@ -243,11 +259,7 @@ class EchoLearnNN(nn.Module):
         out_channels = self._output_config.num_channels
         num_params = self._output_config.num_implicit_params
 
-        if self._output_config.tof_cropping:
-            v0 = self.fullyConnected(fc_input)
-            output = self.final(v0)
-            assert output.shape == (B, out_channels)
-        elif self._output_config.implicit:
+        if self._output_config.implicit:
             implicit_params = d['params']
             
             assert len(implicit_params.shape) == 3
@@ -276,23 +288,29 @@ class EchoLearnNN(nn.Module):
             output = self.final(v1)
             assert output.shape == ((B, out_channels) + ((res,) * out_dims))
 
-        if (self._output_config.predict_variance):
-            mean = output[:, 0:1]
-            pre_variance = output[:, 1:2]
-
-            # variance = torch.exp(pre_variance)
-
-            variance = torch.min(
-                torch.stack((
-                    torch.exp(pre_variance),
-                    1.0 + torch.abs(pre_variance)
-                ),
-                dim=1
-            ), dim=1)[0]
-
-            output = torch.cat((mean, variance), dim=1)
+        output = self.scale_variance(output)
 
         return DeviceDict({'output': output})
+
+    def scale_variance(self, x):
+        if not self._output_config.predict_variance:
+            assert x.shape[1] == 1
+            return x
+        assert x.shape[1] == 2
+        mean = x[:, 0:1]
+        pre_variance = x[:, 1:2]
+
+        # variance = torch.exp(pre_variance)
+
+        variance = torch.min(
+            torch.stack((
+                torch.exp(pre_variance),
+                1.0 + torch.abs(pre_variance)
+            ),
+            dim=1
+        ), dim=1)[0]
+
+        return torch.cat((mean, variance), dim=1)
 
     def save(self, filename):
         print(f"Saving model to \"{filename}\"")

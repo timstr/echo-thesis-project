@@ -8,9 +8,8 @@ import torch
 from dataset import WaveSimDataset
 from featurize import make_sdf_image_gt, colourize_sdf
 
+
 def main():
-
-
 
     tcfg = TrainingConfig(max_examples=512)
     ecfg = EmitterConfig()
@@ -27,9 +26,9 @@ def main():
     example = wsds[500]
 
     obs_list = example['obstacles_list']
-    audio = torch.tensor(example['input']) * 0.01
+    audio = torch.tensor(example['input'])
 
-    dummy_batch = { "obstacles_list": [obs_list]}
+    dummy_batch = {"obstacles_list": [obs_list]}
 
     res = 256
 
@@ -83,7 +82,8 @@ def main():
         ax_l.cla()
         ax_r.cla()
 
-        audio_cropped = crop_audio_from_location(audio.unsqueeze(1), icfg, sample_y, sample_x)
+        audio_cropped = crop_audio_from_location(
+            audio, icfg, sample_y, sample_x)
 
         ax_l.set_ylim(0.0, 1.0)
         ax_l.set_xlim(0, icfg.tof_crop_size)
@@ -93,7 +93,7 @@ def main():
             bottom = (j + 1) / icfg.num_channels
             center = (top + bottom) * 0.5
             scale = bottom - top
-            ax_l.plot(center + scale * audio_cropped[j,0].detach())
+            ax_l.plot(center + scale * audio_cropped[j].detach())
 
         ax_r.set_xlim(0, res)
         ax_r.set_ylim(res, 0)
@@ -119,6 +119,7 @@ def main():
 
         fig.canvas.draw()
         fig.canvas.flush_events()
+
 
 if __name__ == "__main__":
     main()

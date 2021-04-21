@@ -49,6 +49,10 @@ def make_gcc_single(original, echo, transform):
 
     if transform == "phat":
         r /= np.abs(r)
+    elif transform is None:
+        # HACK
+        # TODO: find a more natural way of scaling down the signal, such as dividing by the amplitude or power of the emitted signal
+        r *= 0.02
 
     cc = np.fft.irfft(r, n=n)
 
