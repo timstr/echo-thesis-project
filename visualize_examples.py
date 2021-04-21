@@ -5,10 +5,13 @@ import matplotlib.pyplot as plt
 from wave_field import Field
 from progress_bar import progress_bar
 
+
 def main():
     plt.ion()
 
-    all_of_them = list(all_possible_obstacles(2, 0.05, 0.1, 0.3, 0.1, 0.8, 0.1, 0.9, 3, 4, 4))
+    all_of_them = list(
+        all_possible_obstacles(2, 0.05, 0.1, 0.3, 0.1, 0.8, 0.1, 0.9, 3, 4, 4)
+    )
 
     for i, o in enumerate(all_of_them):
         f = Field(512)

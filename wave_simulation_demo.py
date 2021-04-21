@@ -8,6 +8,7 @@ import scipy.io.wavfile as wf
 from wave_field import Field, make_random_field
 from progress_bar import progress_bar
 
+
 def main():
     size = 512
 
@@ -36,7 +37,9 @@ def main():
                     s = 1.0 if t == 0 else 0.0
                 else:
                     if t < pulse_len:
-                        freq_exp_now = freq_exp_begin + (t / pulse_len) * (freq_exp_end - freq_exp_begin)
+                        freq_exp_now = freq_exp_begin + (t / pulse_len) * (
+                            freq_exp_end - freq_exp_begin
+                        )
                         freq_now = math.pow(2.0, freq_exp_now)
                         osc_state += freq_now
                         s = math.sin(osc_state * 2.0 * np.pi)
@@ -46,14 +49,16 @@ def main():
                 y = size - 8
                 x = size // 2
                 rad = 1
-                field.get_field()[y-rad:y+rad, x-rad:x+rad] = s
+                field.get_field()[y - rad : y + rad, x - rad : x + rad] = s
                 pulse_recording.append(s)
 
                 field.step()
-                mic_recording.append(field.get_field()[mic_location[0], mic_location[1]].item())
+                mic_recording.append(
+                    field.get_field()[mic_location[0], mic_location[1]].item()
+                )
                 t += 1
             progress_bar(t - 1, total_len)
-            
+
             plt.cla()
             plt.imshow(field.to_image().cpu())
             plt.gcf().canvas.draw()
@@ -64,6 +69,7 @@ def main():
         suffix = "impulse" if use_impulse else "sweep"
         wf.write(f"wave simulation received {suffix}.wav", 44100, mic_recording)
         wf.write(f"wave simulation emitted {suffix}.wav", 44100, pulse_recording)
+
 
 if __name__ == "__main__":
     main()

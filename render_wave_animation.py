@@ -10,23 +10,26 @@ from config import wavesim_emitter_locations, wavesim_receiver_locations
 
 size = 512
 
-def render_animation(field, duration, fps=30, output_path="animation.mp4", on_render_frame=None, render_interval=4):
-    plt.axis('off')
-    fig = plt.figure(
-        figsize=(8,8),
-        dpi=64
-    )
 
-    im_field = plt.imshow(
-        field.to_image().cpu()
-    )
+def render_animation(
+    field,
+    duration,
+    fps=30,
+    output_path="animation.mp4",
+    on_render_frame=None,
+    render_interval=4,
+):
+    plt.axis("off")
+    fig = plt.figure(figsize=(8, 8), dpi=64)
+
+    im_field = plt.imshow(field.to_image().cpu())
 
     eys = []
     exs = []
     for (ey, ex) in wavesim_emitter_locations:
         eys.append(ey)
         exs.append(ex)
-    
+
     plt.scatter(exs, eys, s=50, c="yellow")
 
     rys = []
@@ -52,12 +55,8 @@ def render_animation(field, duration, fps=30, output_path="animation.mp4", on_re
         plt.gca().set_title("Step {}".format(step_count))
         progress_bar(i, num_frames)
 
-
     ani = matplotlib.animation.FuncAnimation(
-        fig,
-        animate,
-        frames=num_frames,
-        interval = 1000/fps
+        fig, animate, frames=num_frames, interval=1000 / fps
     )
 
     ani.save(output_path)
@@ -65,6 +64,7 @@ def render_animation(field, duration, fps=30, output_path="animation.mp4", on_re
     print("Simulation ran for {} steps".format(step_count))
 
     sys.stdout.write("\nSaved animation to {}".format(output_path))
+
 
 # def make_wavelet(field):
 #     _, _, h, w = field.get_field().shape
@@ -80,16 +80,29 @@ def render_animation(field, duration, fps=30, output_path="animation.mp4", on_re
 #     gaussian_mask = torch.exp(-distsqr * 100.0)
 #     freq = y * 100.0
 #     amp = 0.1
-    
+
 #     field.get_field()[0,0,:,:] = amp * torch.sin(freq * y).unsqueeze(-1) * gaussian_mask
 #     field.get_field()[0,1,:,:] = 0.75 * amp * torch.cos(freq * y).unsqueeze(-1) * gaussian_mask
+
 
 def main():
 
     # field = make_random_field(size, 2) # Field with obstacles
-    field = Field(size) # empty field
-    field.add_obstacles([('Rectangle', 0.15000000000000002, 0.15000000000000002, 0.07071067811865475, 0.07071067811865475, 0.7853981633974483), ('Circle', 0.5333333333333333, 0.6000000000000001, 0.1)])
-    
+    field = Field(size)  # empty field
+    field.add_obstacles(
+        [
+            (
+                "Rectangle",
+                0.15000000000000002,
+                0.15000000000000002,
+                0.07071067811865475,
+                0.07071067811865475,
+                0.7853981633974483,
+            ),
+            ("Circle", 0.5333333333333333, 0.6000000000000001, 0.1),
+        ]
+    )
+
     emitter_locations = [
         (size - 8, size // 2 - 200),
         (size - 8, size // 2 - 100),
@@ -109,11 +122,11 @@ def main():
                 the_field = field.get_field()
                 ey = emitter_locations[e][0]
                 ex = emitter_locations[e][1]
-                
+
                 ls = torch.linspace(0.0, size, size, device="cuda")
                 y, x = torch.meshgrid((ls, ls))
 
-                dist_sqr = (y - ey)**2 + (x - ex)**2
+                dist_sqr = (y - ey) ** 2 + (x - ex) ** 2
                 amp = -2.0 * torch.exp(-dist_sqr * 0.1)
 
                 the_field[...] += amp
@@ -125,7 +138,7 @@ def main():
     # field.get_field()[0,0,32:42, 32:42] = 0.25 # single impulse
     # rad = 1
     # field.get_field()[0,0,size//2-rad:size//2+rad,size//2-rad:size//2+rad] = 2.5
-    
+
     # plt.imshow(field.get_barrier()[0,0,:,:].cpu())
     # plt.show()
 
@@ -144,8 +157,9 @@ def main():
         fps=fps,
         output_path="waves.mp4",
         on_render_frame=on_render_frame,
-        render_interval=render_interval
+        render_interval=render_interval,
     )
+
 
 if __name__ == "__main__":
     main()

@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import math
 
+
 def main():
     size = 2048
     f = Field(size)
@@ -13,8 +14,8 @@ def main():
     emitter_x = size // 2
 
     f.get_field()[
-        emitter_y-emitter_radius:emitter_y+emitter_radius,
-        emitter_x-emitter_radius:emitter_x+emitter_radius
+        emitter_y - emitter_radius : emitter_y + emitter_radius,
+        emitter_x - emitter_radius : emitter_x + emitter_radius,
     ] = 1.0
 
     plot_interval = size // 10
@@ -29,17 +30,16 @@ def main():
             plt.imshow(f.to_image().cpu())
             plt.gcf().canvas.draw()
             plt.gcf().canvas.flush_events()
-            
 
-        field_below_emitter = f.get_field()[emitter_y:,emitter_x].cpu().numpy()
+        field_below_emitter = f.get_field()[emitter_y:, emitter_x].cpu().numpy()
 
         peak = np.argmax(field_below_emitter)
-        
+
         time_steps.append(i)
         detected_peaks.append(peak)
 
         f.step()
-    
+
     plt.cla()
     plt.ioff()
 

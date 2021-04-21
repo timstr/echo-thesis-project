@@ -6,4 +6,4 @@ def realbool(s):
     elif sl in ["0", "false", "f", "no", "n"]:
         return False
     else:
-        raise Exception(f"\"{sl}\" is not a real boolean")
+        raise Exception(f'"{sl}" is not a real boolean')

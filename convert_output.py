@@ -2,6 +2,7 @@ from config import OutputConfig
 from featurize import make_dense_outputs
 import torch
 
+
 def convert_sdf_to_occupancy(sdf):
     """
     SDF values less than `threshold` are considered to be inside an object
@@ -11,7 +12,8 @@ def convert_sdf_to_occupancy(sdf):
     assert B == 1
     assert C in [1, 2]
     assert H == W
-    return (sdf[:,:1,:,:] <= threshold).to(torch.bool)
+    return (sdf[:, :1, :, :] <= threshold).to(torch.bool)
+
 
 def convert_heatmap_to_occupancy(hm):
     """
@@ -22,7 +24,8 @@ def convert_heatmap_to_occupancy(hm):
     assert B == 1
     assert C in [1, 2]
     assert H == W
-    return (hm[:,:1,:,:] >= threshold).to(torch.bool)
+    return (hm[:, :1, :, :] >= threshold).to(torch.bool)
+
 
 def convert_occupancy_to_shadowed_occupancy(occupancy):
     B, C, H, W = occupancy.shape
@@ -32,9 +35,10 @@ def convert_occupancy_to_shadowed_occupancy(occupancy):
     mask_row = torch.zeros((1, 1, W), dtype=torch.bool, device=occupancy.device)
     out = torch.zeros((1, 1, H, W), dtype=torch.bool, device=occupancy.device)
     for i in list(range(H))[::-1]:
-        mask_row[occupancy[:,:,i,:] > 0.0] = 1
-        out[:,:,i,:] = mask_row
+        mask_row[occupancy[:, :, i, :] > 0.0] = 1
+        out[:, :, i, :] = mask_row
     return out
+
 
 def convert_depthmap_to_shadowed_occupancy(depthmap):
     B, C, W = depthmap.shape
@@ -43,11 +47,12 @@ def convert_depthmap_to_shadowed_occupancy(depthmap):
     out = torch.zeros((1, 1, W, W), dtype=torch.bool, device=depthmap.device)
     for b in range(B):
         for x in range(W):
-            d = depthmap[b,0,x].item()
+            d = depthmap[b, 0, x].item()
             dc = min(max(d, 0.0), 1.0)
             i = int((1.0 - dc) * (W - 1))
-            out[b,0,0:i,x] = 1
+            out[b, 0, 0:i, x] = 1
     return out
+
 
 def predicted_occupancy(tensor, output_config, shadowed):
     assert isinstance(output_config, OutputConfig)
@@ -64,6 +69,7 @@ def predicted_occupancy(tensor, output_config, shadowed):
         return convert_occupancy_to_shadowed_occupancy(o)
     return o
 
+
 def ground_truth_occupancy(obstacles, size, shadowed):
     sdf = make_dense_outputs(obstacles, "sdf", size)
     o = convert_sdf_to_occupancy(sdf.unsqueeze(0).unsqueeze(0))
@@ -71,9 +77,14 @@ def ground_truth_occupancy(obstacles, size, shadowed):
         return convert_occupancy_to_shadowed_occupancy(o)
     return o
 
+
 def compute_error_metrics(occupancy_gt, occupancy_pred):
-    assert isinstance(occupancy_gt, torch.BoolTensor) or isinstance(occupancy_gt, torch.cuda.BoolTensor)
-    assert isinstance(occupancy_pred, torch.BoolTensor) or isinstance(occupancy_pred, torch.cuda.BoolTensor)
+    assert isinstance(occupancy_gt, torch.BoolTensor) or isinstance(
+        occupancy_gt, torch.cuda.BoolTensor
+    )
+    assert isinstance(occupancy_pred, torch.BoolTensor) or isinstance(
+        occupancy_pred, torch.cuda.BoolTensor
+    )
     assert occupancy_gt.shape == occupancy_pred.shape
     B, C, H, W = occupancy_gt.shape
     assert B == 1
@@ -88,13 +99,13 @@ def compute_error_metrics(occupancy_gt, occupancy_pred):
     def as_fraction(t):
         assert isinstance(t, torch.BoolTensor) or isinstance(t, torch.cuda.BoolTensor)
         assert t.shape == (1, 1, H, H)
-        f = torch.sum(t).item() / (H**2)
+        f = torch.sum(t).item() / (H ** 2)
         assert f >= 0.0 and f <= 1.0
         return f
 
     intersection = torch.logical_and(gt_true, pred_true)
     union = torch.logical_or(gt_true, pred_true)
-    
+
     f_intersection = as_fraction(intersection)
     f_union = as_fraction(union)
 
@@ -120,7 +131,16 @@ def compute_error_metrics(occupancy_gt, occupancy_pred):
     f_false_positives = as_fraction(false_positives)
     f_false_negatives = as_fraction(false_negatives)
 
-    assert abs(f_true_positives + f_true_negatives + f_false_positives + f_false_negatives - 1.0) < epsilon
+    assert (
+        abs(
+            f_true_positives
+            + f_true_negatives
+            + f_false_positives
+            + f_false_negatives
+            - 1.0
+        )
+        < epsilon
+    )
 
     selected = f_true_positives + f_false_positives
     relevant = f_true_positives + f_false_negatives
@@ -128,7 +148,11 @@ def compute_error_metrics(occupancy_gt, occupancy_pred):
     precision = f_true_positives / selected if (selected > epsilon) else 0.0
     recall = f_true_positives / relevant if (relevant > epsilon) else 0.0
 
-    f1score = (2.0 * precision * recall / (precision + recall)) if (abs(precision + recall) > epsilon) else 0.0
+    f1score = (
+        (2.0 * precision * recall / (precision + recall))
+        if (abs(precision + recall) > epsilon)
+        else 0.0
+    )
 
     return {
         "intersection": f_intersection,
@@ -140,5 +164,5 @@ def compute_error_metrics(occupancy_gt, occupancy_pred):
         "false_negatives": f_false_negatives,
         "precision": precision,
         "recall": recall,
-        "f1score": f1score
+        "f1score": f1score,
     }

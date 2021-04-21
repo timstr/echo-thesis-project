@@ -7,9 +7,10 @@ import math
 
 from Echo4ChDatasetRaw import Echo4ChDatasetRaw
 
+
 def convert_example(d):
     assert isinstance(d, DeviceDict)
-    
+
     spectrograms = d["spectrograms"]
     occupancy = d["occupancy"]
     depthmap = d["depthmap"]
@@ -34,11 +35,7 @@ def convert_example(d):
     out_o = occupancy.to(torch.uint8).numpy()
     out_d = depthmap.to(torch.uint8).numpy()
 
-    return {
-        "spectrograms": out_s,
-        "occupancy": out_o,
-        "depthmap": out_d
-    }
+    return {"spectrograms": out_s, "occupancy": out_o, "depthmap": out_d}
 
 
 def main():
@@ -47,8 +44,10 @@ def main():
     output_path = os.environ.get("NEW_DATASET_PATH")
 
     if output_path is None or not os.path.exists(output_path):
-        raise Exception("Please set the NEW_DATASET_PATH environment variable to point to the desired new dataset directory")   
-    
+        raise Exception(
+            "Please set the NEW_DATASET_PATH environment variable to point to the desired new dataset directory"
+        )
+
     dataset_size = len(e4c)
 
     num_digits = int(math.ceil(math.log10(dataset_size)))
@@ -60,6 +59,7 @@ def main():
         with open(path, "wb") as outfile:
             compress_pickle.dump(converted, outfile, "gzip")
         progress_bar(i, dataset_size)
+
 
 if __name__ == "__main__":
     main()

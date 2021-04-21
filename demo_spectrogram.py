@@ -4,6 +4,7 @@ import glob
 
 from featurize_audio import make_spectrogram
 
+
 def main():
     filenames = sorted(glob.glob("*simulation*.wav"))
 
@@ -11,7 +12,7 @@ def main():
         if fn.find("waveshaped") > 0:
             continue
         sfreq, data = wf.read(fn)
-        
+
         try:
             spectrogram = make_spectrogram(data)
         except:
@@ -21,6 +22,7 @@ def main():
         plt.imshow(spectrogram)
         plt.gcf().suptitle(fn)
         plt.show()
+
 
 if __name__ == "__main__":
     main()

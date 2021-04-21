@@ -2,8 +2,10 @@ import torch
 import torch.nn as nn
 from functools import reduce
 
+
 def prod(iterable, start=1):
     return reduce(lambda a, b: a * b, iterable, start)
+
 
 class Reshape(nn.Module):
     def __init__(self, input_shape, output_shape):
@@ -18,5 +20,7 @@ class Reshape(nn.Module):
         assert isinstance(x, torch.Tensor)
         B = x.shape[0]
         if x.shape[1:] != self._input_shape:
-            raise Exception(f"Reshape: expected input size {self._input_shape} but got {tuple(x.shape[1:])} instead")
+            raise Exception(
+                f"Reshape: expected input size {self._input_shape} but got {tuple(x.shape[1:])} instead"
+            )
         return x.view(B, *self._output_shape)

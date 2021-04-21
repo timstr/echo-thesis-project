@@ -2,13 +2,14 @@ import torch
 
 from wave_simulation import step_simulation
 from shape_types import CIRCLE, RECTANGLE
-from featurize import  make_random_obstacles, all_yx_locations, heatmap_batch
+from featurize import make_random_obstacles, all_yx_locations, heatmap_batch
 
 from the_device import the_device
 
 # TODO: test whether doing convolutions in-place is faster (e.g. using torch's `out` parameters)
 
-class Field():
+
+class Field:
     def __init__(self, size):
         self._size = size
         self._obstacles = []
@@ -50,7 +51,7 @@ class Field():
         if len(self._obstacles) == 0:
             self._barrier = torch.tensor([[1.0]], dtype=torch.float).to(the_device)
             return
-        
+
         coordinates_yx_batch = all_yx_locations(self._size)
 
         self._barrier = heatmap_batch(coordinates_yx_batch, self._obstacles)
@@ -71,7 +72,9 @@ class Field():
     def step(self):
         self._update_barrier()
 
-        self._field_now, self._field_prev = step_simulation(self._field_now, self._field_prev)
+        self._field_now, self._field_prev = step_simulation(
+            self._field_now, self._field_prev
+        )
         self._field_now *= self._barrier
 
         assert self._field_now.shape == (self._size, self._size)
@@ -85,11 +88,12 @@ class Field():
         # Green: absolute amplitude minus one
         g = torch.clamp(torch.abs(-amp * self._field_now) - 1.0, 0.0, 1.0)
         # Blue: negative amplitude
-        b = torch.clamp(-amp * self._field_now , 0.0, 1.0)
+        b = torch.clamp(-amp * self._field_now, 0.0, 1.0)
         rgb = torch.stack((r, g, b), dim=2)
         # Make obstacles appear grey
         rgb += (0.5 - rgb) * (1.0 - self._barrier.unsqueeze(-1))
         return rgb
+
 
 def make_random_field(size, max_num_obstacles=10):
     f = Field(size)

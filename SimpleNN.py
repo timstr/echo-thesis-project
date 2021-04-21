@@ -4,14 +4,21 @@ import math
 
 from device_dict import DeviceDict
 
+
 class SimpleNN(nn.Module):
     def __init__(self, input_config, output_config):
         super(SimpleNN, self).__init__()
-        raise Exception("This code is currently undergoing maintenance and is not available. Please try again later.")
+        raise Exception(
+            "This code is currently undergoing maintenance and is not available. Please try again later."
+        )
         # TODO
-        self._num_implicit_params = num_implicit_params if num_implicit_params is not None else 0
+        self._num_implicit_params = (
+            num_implicit_params if num_implicit_params is not None else 0
+        )
         self._output_format = output_format
-        self._output_resolution = output_resolution if output_resolution is not None else 1
+        self._output_resolution = (
+            output_resolution if output_resolution is not None else 1
+        )
         self._predict_variance = predict_variance
 
         self._param_repetitions = 1
@@ -29,15 +36,10 @@ class SimpleNN(nn.Module):
 
         def makeFullyConnected(in_features, out_features, activation=True):
             lin = nn.Linear(
-                in_features=in_features,
-                out_features=out_features,
-                bias=True
+                in_features=in_features, out_features=out_features, bias=True
             )
             if activation:
-                return nn.Sequential(
-                    lin,
-                    nn.ReLU()
-                )
+                return nn.Sequential(lin, nn.ReLU())
             else:
                 return lin
 
@@ -46,7 +48,7 @@ class SimpleNN(nn.Module):
         elif self._output_format == "1D":
             self._num_outputs = output_resolution
         elif self._output_format == "2D":
-            self._num_outputs = output_resolution**2
+            self._num_outputs = output_resolution ** 2
 
         self._num_inputs = 4096 * num_input_channels
 
@@ -56,9 +58,9 @@ class SimpleNN(nn.Module):
         self.fc4 = makeFullyConnected(32 + self._num_implicit_params, 128)
         self.fc5 = makeFullyConnected(128, 128)
         self.fc6 = makeFullyConnected(128, self._num_outputs, activation=False)
-        
+
     def forward(self, d):
-        w  = d['input']
+        w = d["input"]
 
         B = w.shape[0]
 
@@ -71,12 +73,9 @@ class SimpleNN(nn.Module):
         x3 = self.fc3(x2)
 
         if self._num_implicit_params > 0:
-            implicit_params = d['params']
+            implicit_params = d["params"]
             assert implicit_params.shape == (B, self._num_implicit_params)
-            x3 = torch.cat(
-                (x3, implicit_params),
-                dim=1
-            )
+            x3 = torch.cat((x3, implicit_params), dim=1)
 
         x4 = self.fc4(x3)
         x5 = self.fc5(x4)
@@ -93,4 +92,4 @@ class SimpleNN(nn.Module):
         elif self._output_format == "2D":
             output = xfinal.reshape(B, self._output_resolution, self._output_resolution)
 
-        return DeviceDict({'output': output})
+        return DeviceDict({"output": output})

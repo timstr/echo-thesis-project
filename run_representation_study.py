@@ -1,5 +1,6 @@
 import subprocess
 
+
 def run_process(representation, implicitfunction):
     arg_repr = "--representation={}".format(representation)
     arg_imfn = "--implicitfunction" if implicitfunction else ""
@@ -14,10 +15,12 @@ def run_process(representation, implicitfunction):
     cmd_full = cmd_base + " " + args_all
     subprocess.run(cmd_full)
 
+
 def main():
     for representation in ["sdf", "heatmap", "depthmap"]:
         for implicitfunction in [False, True]:
             run_process(representation, implicitfunction)
+
 
 if __name__ == "__main__":
     main()

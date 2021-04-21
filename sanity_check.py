@@ -4,6 +4,7 @@ import torch
 import math
 from os import abort
 
+
 def sanitycheck(x, desc):
     mag = torch.max(torch.abs(x)).item()
     if not math.isfinite(mag):
@@ -13,6 +14,7 @@ def sanitycheck(x, desc):
     if mag > 50.0:
         print(f"WATCH OUT! Large magnitude {mag} detected during {desc}")
 
+
 class SanityCheckLayer(torch.nn.Module):
     def __init__(self, description="", module=None):
         super(SanityCheckLayer, self).__init__()
@@ -20,7 +22,7 @@ class SanityCheckLayer(torch.nn.Module):
         self._description = description
         assert module is None or isinstance(module, torch.nn.Module)
         self._module = module
-        
+
     def forward(self, x):
         assert isinstance(x, torch.Tensor)
         sanitycheck(x, self._description)

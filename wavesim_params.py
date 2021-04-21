@@ -8,22 +8,22 @@ wavesim_duration = 2048
 wavesim_speed_of_sound = 0.7804932396917319
 
 wavesim_emitter_locations = [
-    (wavesim_field_size - 8, wavesim_field_size // 2 - 200), # 0 - ll
-    (wavesim_field_size - 8, wavesim_field_size // 2 - 100), # 1 - l
-    (wavesim_field_size - 8, wavesim_field_size // 2      ), # 2 - m
-    (wavesim_field_size - 8, wavesim_field_size // 2 + 100), # 3 - r
-    (wavesim_field_size - 8, wavesim_field_size // 2 + 200), # 4 - rr
+    (wavesim_field_size - 8, wavesim_field_size // 2 - 200),  # 0 - ll
+    (wavesim_field_size - 8, wavesim_field_size // 2 - 100),  # 1 - l
+    (wavesim_field_size - 8, wavesim_field_size // 2),  # 2 - m
+    (wavesim_field_size - 8, wavesim_field_size // 2 + 100),  # 3 - r
+    (wavesim_field_size - 8, wavesim_field_size // 2 + 200),  # 4 - rr
 ]
 
 wavesim_receiver_locations = [
-    (wavesim_field_size - 8,  wavesim_field_size // 2 - 150), # 0 - bll
-    (wavesim_field_size - 8,  wavesim_field_size // 2 - 50 ), # 1 - bl
-    (wavesim_field_size - 8,  wavesim_field_size // 2 + 50 ), # 2 - br
-    (wavesim_field_size - 8,  wavesim_field_size // 2 + 150), # 3 - brr
-    (wavesim_field_size - 16, wavesim_field_size // 2 - 150), # 4 - tll
-    (wavesim_field_size - 16, wavesim_field_size // 2 - 50 ), # 5 - tl
-    (wavesim_field_size - 16, wavesim_field_size // 2 + 50 ), # 6 - tr
-    (wavesim_field_size - 16, wavesim_field_size // 2 + 150), # 7 - trr
+    (wavesim_field_size - 8, wavesim_field_size // 2 - 150),  # 0 - bll
+    (wavesim_field_size - 8, wavesim_field_size // 2 - 50),  # 1 - bl
+    (wavesim_field_size - 8, wavesim_field_size // 2 + 50),  # 2 - br
+    (wavesim_field_size - 8, wavesim_field_size // 2 + 150),  # 3 - brr
+    (wavesim_field_size - 16, wavesim_field_size // 2 - 150),  # 4 - tll
+    (wavesim_field_size - 16, wavesim_field_size // 2 - 50),  # 5 - tl
+    (wavesim_field_size - 16, wavesim_field_size // 2 + 50),  # 6 - tr
+    (wavesim_field_size - 16, wavesim_field_size // 2 + 150),  # 7 - trr
 ]
 
 
@@ -37,6 +37,7 @@ def make_emitter_indices(arrangement):
         return [0, 1, 2, 3, 4]
     else:
         raise Exception("Unrecognized emitter layout")
+
 
 def make_receiver_indices(num_receivers, arrangement):
     assert num_receivers in [1, 2, 4, 8]

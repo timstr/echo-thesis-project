@@ -7,16 +7,17 @@ from shape_types import CIRCLE
 emitter_beep_sweep_len = wavesim_duration // 16
 emitter_sequential_delay = wavesim_duration // 8
 
+
 def make_emitter_signal(frequency_index, delay, format):
     assert frequency_index in range(5)
     assert delay < wavesim_duration
     assert format in ["impulse", "beep", "sweep"]
     # frequency (relative to sampling frequency)
-    freq = math.pow(2.0, frequency_index / 5.0) / 32.0 # pentatonic scale ftw
+    freq = math.pow(2.0, frequency_index / 5.0) / 32.0  # pentatonic scale ftw
     sig_len = min(max(wavesim_duration - delay, 0), emitter_beep_sweep_len)
-    
+
     out = np.zeros((wavesim_duration,))
-    out_sig = out[delay:delay+sig_len]
+    out_sig = out[delay : delay + sig_len]
     if format == "impulse":
         out[delay] = 1.0
     elif format == "beep":
@@ -32,8 +33,11 @@ def make_emitter_signal(frequency_index, delay, format):
         raise Exception("Unrecognized signal format")
     return out
 
+
 class EmitterConfig:
-    def __init__(self, arrangement="mono", format="sweep", sequential=False, sameFrequency=False):
+    def __init__(
+        self, arrangement="mono", format="sweep", sequential=False, sameFrequency=False
+    ):
         assert arrangement in ["mono", "stereo", "surround"]
         assert format in ["impulse", "beep", "sweep"]
         assert isinstance(sequential, bool)
@@ -45,18 +49,22 @@ class EmitterConfig:
 
         self.indices = make_emitter_indices(self.arrangement)
 
-        self.emitted_signals = [make_emitter_signal(
-            frequency_index=(0 if self.sameFrequency else i),
-            delay=(i * emitter_sequential_delay if self.sequential else 0),
-            format=self.format
-        ) for i in range(len(self.indices))]
-    
+        self.emitted_signals = [
+            make_emitter_signal(
+                frequency_index=(0 if self.sameFrequency else i),
+                delay=(i * emitter_sequential_delay if self.sequential else 0),
+                format=self.format,
+            )
+            for i in range(len(self.indices))
+        ]
+
     def print(self):
         print(f"Emitter Configuration:")
         print(f"  arrangement              : {self.arrangement}")
         print(f"  format                   : {self.format}")
         print(f"  sequential?              : {self.sequential}")
         print(f"  same frequency?          : {self.sequential}")
+
 
 class ReceiverConfig:
     def __init__(self, arrangement="grid", count=8):
@@ -65,7 +73,7 @@ class ReceiverConfig:
             ("flat", 2),
             ("flat", 4),
             ("grid", 4),
-            ("grid", 8)
+            ("grid", 8),
         ]
         self.arrangement = arrangement
         self.count = count
@@ -78,8 +86,22 @@ class ReceiverConfig:
 
 
 class InputConfig:
-    def __init__(self, emitter_config, receiver_config, format="spectrogram", summary_statistics=True, using_echo4ch=False, tof_crop_size=None):
-        assert format in ["audioraw", "audiowaveshaped", "spectrogram", "gcc", "gccphat"]
+    def __init__(
+        self,
+        emitter_config,
+        receiver_config,
+        format="spectrogram",
+        summary_statistics=True,
+        using_echo4ch=False,
+        tof_crop_size=None,
+    ):
+        assert format in [
+            "audioraw",
+            "audiowaveshaped",
+            "spectrogram",
+            "gcc",
+            "gccphat",
+        ]
         assert isinstance(emitter_config, EmitterConfig)
         assert isinstance(receiver_config, ReceiverConfig)
         assert tof_crop_size is None or isinstance(tof_crop_size, int)
@@ -112,8 +134,17 @@ class InputConfig:
         print(f"  time-of-flight cropping? : {self.tof_cropping}")
         print(f"  time-of-flight crop size : {self.tof_crop_size}")
 
+
 class OutputConfig:
-    def __init__(self, format="sdf", implicit=True, predict_variance=True, tof_cropping=False, resolution=1024, using_echo4ch=False):
+    def __init__(
+        self,
+        format="sdf",
+        implicit=True,
+        predict_variance=True,
+        tof_cropping=False,
+        resolution=1024,
+        using_echo4ch=False,
+    ):
         assert format in ["depthmap", "heatmap", "sdf"]
         assert isinstance(implicit, bool)
         assert isinstance(predict_variance, bool)
@@ -136,7 +167,7 @@ class OutputConfig:
             self.dims = 1 if format == "depthmap" else 2
         self.num_implicit_params = 0 if not implicit else self.dims
         self.num_channels = 2 if predict_variance else 1
-    
+
     def print(self):
         print(f"Output Configuration:")
         print(f"  format                   : {self.format}")
@@ -150,7 +181,15 @@ class OutputConfig:
 
 
 class TrainingConfig:
-    def __init__(self, max_examples=None, max_obstacles=None, circles_only=False, allow_occlusions=True, importance_sampling=False, samples_per_example=128):
+    def __init__(
+        self,
+        max_examples=None,
+        max_obstacles=None,
+        circles_only=False,
+        allow_occlusions=True,
+        importance_sampling=False,
+        samples_per_example=128,
+    ):
         assert max_examples is None or isinstance(max_examples, int)
         assert max_obstacles is None or isinstance(max_obstacles, int)
         assert isinstance(circles_only, bool)
@@ -158,7 +197,7 @@ class TrainingConfig:
         assert isinstance(importance_sampling, bool)
         assert isinstance(importance_sampling, bool)
         assert isinstance(samples_per_example, int)
-        
+
         self.max_examples = max_examples
         self.max_obstacles = max_obstacles
         self.circles_only = circles_only
@@ -169,6 +208,7 @@ class TrainingConfig:
     def print(self):
         def someOrAll(n):
             return "no limit" if n is None else str(n)
+
         print(f"Training Configuration:")
         print(f"  maximum examples         : {someOrAll(self.max_examples)}")
         print(f"  maximum obstacles        : {someOrAll(self.max_obstacles)}")
@@ -176,6 +216,7 @@ class TrainingConfig:
         print(f"  allow occlusions?        : {self.allow_occlusions}")
         print(f"  importance sampling?     : {self.importance_sampling}")
         print(f"  samples per example      : {self.samples_per_example}")
+
 
 def example_should_be_used(obstacles, occlusion, training_config):
     assert isinstance(obstacles, list)
@@ -190,7 +231,10 @@ def example_should_be_used(obstacles, occlusion, training_config):
 
     if not training_config.allow_occlusions and occlusion:
         return False
-    if training_config.max_obstacles is not None and len(obstacles) > training_config.max_obstacles:
+    if (
+        training_config.max_obstacles is not None
+        and len(obstacles) > training_config.max_obstacles
+    ):
         return False
     if training_config.circles_only and not allCircles(obstacles):
         return False

@@ -1,11 +1,24 @@
 import fix_dead_command_line
 
-from config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
+from config import (
+    EmitterConfig,
+    InputConfig,
+    OutputConfig,
+    ReceiverConfig,
+    TrainingConfig,
+)
 import matplotlib.pyplot as plt
 import numpy as np
 
 from dataset import WaveSimDataset
-from featurize import make_depthmap_gt, make_heatmap_image_gt, make_sdf_image_gt, obstacles_occluded, colourize_sdf
+from featurize import (
+    make_depthmap_gt,
+    make_heatmap_image_gt,
+    make_sdf_image_gt,
+    obstacles_occluded,
+    colourize_sdf,
+)
+
 
 def main():
     tcfg = TrainingConfig(max_examples=128)
@@ -24,14 +37,14 @@ def main():
     # for i in range(6166, 7331):
     for i in range(len(wsds)):
 
-        example = wsds[i*8]
+        example = wsds[i * 8]
         # example = wsds[61]
 
-        obs_list = example['obstacles_list']
-        spectrograms = example['input']
+        obs_list = example["obstacles_list"]
+        spectrograms = example["input"]
         sdf = example["output"]
 
-        dummy_batch = { "obstacles_list": [obs_list]}
+        dummy_batch = {"obstacles_list": [obs_list]}
 
         print(f"Obstacle {i}")
 
@@ -42,7 +55,6 @@ def main():
         plt.imshow(make_heatmap_image_gt(dummy_batch, 512).cpu())
         # plt.show()
 
-        
         # print("Obstacles depthmap")
         # plt.cla()
         plt.plot(512 * (1.0 - make_depthmap_gt(dummy_batch, 512).cpu()))
@@ -80,7 +92,6 @@ def main():
         #         ax[e].plot(impulse_responses[e,r], c=colours[r])
         # plt.show()
 
-        
         print("Impulse responses (spectrograms)")
         print("spectrogram.shape =", spectrograms.shape)
         vmin = np.min(spectrograms)
@@ -90,7 +101,7 @@ def main():
         n = spectrograms.shape[0]
         fig, ax = plt.subplots(n)
         for i in range(n):
-                ax[i].imshow(spectrograms[i], vmin=vmin, vmax=vmax, cmap="gray")
+            ax[i].imshow(spectrograms[i], vmin=vmin, vmax=vmax, cmap="gray")
         plt.show()
 
 

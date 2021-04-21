@@ -1,9 +1,24 @@
 import fix_dead_command_line
 
-from visualization import plot_ground_truth, plot_inputs, plot_prediction, plt_screenshot
+from visualization import (
+    plot_ground_truth,
+    plot_inputs,
+    plot_prediction,
+    plt_screenshot,
+)
 import os
-from loss_functions import compute_loss_on_dataset, meanAndVarianceLoss, meanSquaredErrorLoss
-from config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
+from loss_functions import (
+    compute_loss_on_dataset,
+    meanAndVarianceLoss,
+    meanSquaredErrorLoss,
+)
+from config import (
+    EmitterConfig,
+    InputConfig,
+    OutputConfig,
+    ReceiverConfig,
+    TrainingConfig,
+)
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
@@ -24,37 +39,127 @@ from EchoLearnNN import EchoLearnNN
 
 to_tensor = torchvision.transforms.ToTensor()
 
+
 def main():
     parser = ArgumentParser()
     parser.add_argument("--experiment", type=str, dest="experiment", required=True)
     parser.add_argument("--maxexamples", type=int, dest="maxexamples", default=None)
     parser.add_argument("--batchsize", type=int, dest="batchsize", default=4)
-    parser.add_argument("--receivercount", type=int, choices=[1, 2, 4, 8, 16, 32, 64], dest="receivercount", default=8)
-    parser.add_argument("--dataset", type=str, choices=["wavesim", "echo4ch"], dest="dataset", default="wavesim")
-    parser.add_argument("--receiverarrangement", type=str, choices=["flat", "grid"], dest="receiverarrangement", default="grid")
-    parser.add_argument("--emitterarrangement", type=str, choices=["mono", "stereo", "surround"], dest="emitterarrangement", default="mono")
-    parser.add_argument("--emittersignal", type=str, choices=["impulse", "beep", "sweep"], dest="emittersignal", default="sweep")
-    parser.add_argument("--emittersequential", dest="emittersequential", default=False, action="store_true")
-    parser.add_argument("--emittersamefrequency", dest="emittersamefrequency", default=False, action="store_true")
+    parser.add_argument(
+        "--receivercount",
+        type=int,
+        choices=[1, 2, 4, 8, 16, 32, 64],
+        dest="receivercount",
+        default=8,
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        choices=["wavesim", "echo4ch"],
+        dest="dataset",
+        default="wavesim",
+    )
+    parser.add_argument(
+        "--receiverarrangement",
+        type=str,
+        choices=["flat", "grid"],
+        dest="receiverarrangement",
+        default="grid",
+    )
+    parser.add_argument(
+        "--emitterarrangement",
+        type=str,
+        choices=["mono", "stereo", "surround"],
+        dest="emitterarrangement",
+        default="mono",
+    )
+    parser.add_argument(
+        "--emittersignal",
+        type=str,
+        choices=["impulse", "beep", "sweep"],
+        dest="emittersignal",
+        default="sweep",
+    )
+    parser.add_argument(
+        "--emittersequential",
+        dest="emittersequential",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--emittersamefrequency",
+        dest="emittersamefrequency",
+        default=False,
+        action="store_true",
+    )
     parser.add_argument("--maxobstacles", type=int, dest="maxobstacles", default=None)
-    parser.add_argument("--circlesonly", dest="circlesonly", default=False, action="store_true")
-    parser.add_argument("--allowocclusions", dest="allowocclusions", default=True, action="store_true")
+    parser.add_argument(
+        "--circlesonly", dest="circlesonly", default=False, action="store_true"
+    )
+    parser.add_argument(
+        "--allowocclusions", dest="allowocclusions", default=True, action="store_true"
+    )
     parser.add_argument("--nosave", dest="nosave", default=False, action="store_true")
-    parser.add_argument("--nodisplay", dest="nodisplay", default=False, action="store_true")
+    parser.add_argument(
+        "--nodisplay", dest="nodisplay", default=False, action="store_true"
+    )
     parser.add_argument("--iterations", type=int, dest="iterations", default=None)
-    parser.add_argument("--implicitfunction", dest="implicitfunction", default=False, action="store_true")
-    parser.add_argument("--samplesperexample", type=int, dest="samplesperexample", default=128)
-    parser.add_argument("--importancesampling", dest="importancesampling", default=False, action="store_true")
-    parser.add_argument("--predictvariance", dest="predictvariance", default=False, action="store_true")
+    parser.add_argument(
+        "--implicitfunction",
+        dest="implicitfunction",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--samplesperexample", type=int, dest="samplesperexample", default=128
+    )
+    parser.add_argument(
+        "--importancesampling",
+        dest="importancesampling",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--predictvariance", dest="predictvariance", default=False, action="store_true"
+    )
     parser.add_argument("--resolution", type=int, dest="resolution", default=128)
-    parser.add_argument("--tofcropping", dest="tofcropping", default=False, action="store_true")
-    parser.add_argument("--tofwindowsize", type=int, dest="tofwindowsize", choices=[64, 128, 256, 512, 1024], default=None)
-    parser.add_argument("--nninput", type=str, dest="nninput", choices=["audioraw", "audiowaveshaped", "spectrogram", "gcc", "gccphat"], required=True)
-    parser.add_argument("--nnoutput", type=str, dest="nnoutput", choices=["sdf", "heatmap", "depthmap"], required=True)
-    parser.add_argument("--summarystatistics", dest="summarystatistics", default=False, action="store_true")
+    parser.add_argument(
+        "--tofcropping", dest="tofcropping", default=False, action="store_true"
+    )
+    parser.add_argument(
+        "--tofwindowsize",
+        type=int,
+        dest="tofwindowsize",
+        choices=[64, 128, 256, 512, 1024],
+        default=None,
+    )
+    parser.add_argument(
+        "--nninput",
+        type=str,
+        dest="nninput",
+        choices=["audioraw", "audiowaveshaped", "spectrogram", "gcc", "gccphat"],
+        required=True,
+    )
+    parser.add_argument(
+        "--nnoutput",
+        type=str,
+        dest="nnoutput",
+        choices=["sdf", "heatmap", "depthmap"],
+        required=True,
+    )
+    parser.add_argument(
+        "--summarystatistics",
+        dest="summarystatistics",
+        default=False,
+        action="store_true",
+    )
     parser.add_argument("--plotinterval", type=int, dest="plotinterval", default=32)
-    parser.add_argument("--validationinterval", type=int, dest="validationinterval", default=256)
-    parser.add_argument("--restoremodelpath", type=str, dest="restoremodelpath", default=None)
+    parser.add_argument(
+        "--validationinterval", type=int, dest="validationinterval", default=256
+    )
+    parser.add_argument(
+        "--restoremodelpath", type=str, dest="restoremodelpath", default=None
+    )
 
     args = parser.parse_args()
 
@@ -64,18 +169,17 @@ def main():
         matplotlib.use("Agg")
 
     dataset_name = args.dataset
-    using_echo4ch = (dataset_name == "echo4ch")
+    using_echo4ch = dataset_name == "echo4ch"
 
     emitter_config = EmitterConfig(
         arrangement=args.emitterarrangement,
         format=args.emittersignal,
         sequential=args.emittersequential,
-        sameFrequency=args.emittersamefrequency
+        sameFrequency=args.emittersamefrequency,
     )
 
     receiver_config = ReceiverConfig(
-        arrangement=args.receiverarrangement,
-        count=args.receivercount
+        arrangement=args.receiverarrangement, count=args.receivercount
     )
 
     input_config = InputConfig(
@@ -84,7 +188,7 @@ def main():
         receiver_config=receiver_config,
         summary_statistics=args.summarystatistics,
         tof_crop_size=args.tofwindowsize,
-        using_echo4ch=using_echo4ch
+        using_echo4ch=using_echo4ch,
     )
 
     output_config = OutputConfig(
@@ -93,7 +197,7 @@ def main():
         predict_variance=args.predictvariance,
         tof_cropping=args.tofcropping,
         resolution=args.resolution,
-        using_echo4ch=using_echo4ch
+        using_echo4ch=using_echo4ch,
     )
 
     training_config = TrainingConfig(
@@ -102,9 +206,8 @@ def main():
         circles_only=args.circlesonly,
         allow_occlusions=args.allowocclusions,
         importance_sampling=args.importancesampling,
-        samples_per_example=args.samplesperexample
+        samples_per_example=args.samplesperexample,
     )
-
 
     print("============== CONFIGURATIONS ==============")
     print(f"Dataset    : {args.dataset}")
@@ -117,13 +220,12 @@ def main():
     print("============================================")
     print("")
 
-    if (args.nosave):
+    if args.nosave:
         print("NOTE: networks are not being saved")
 
-    network = EchoLearnNN(
-        input_config=input_config,
-        output_config=output_config
-    ).to(the_device)
+    network = EchoLearnNN(input_config=input_config, output_config=output_config).to(
+        the_device
+    )
 
     if args.restoremodelpath is not None:
         network.restore(args.restoremodelpath)
@@ -134,7 +236,7 @@ def main():
             input_config,
             output_config,
             emitter_config,
-            receiver_config
+            receiver_config,
         )
     elif dataset_name == "echo4ch":
         ds = Echo4ChDataset(
@@ -142,30 +244,31 @@ def main():
             input_config,
             output_config,
             emitter_config,
-            receiver_config
+            receiver_config,
         )
     else:
-        raise Exception(f"Unrecognized dataset type \"{dataset_name}\"")
+        raise Exception(f'Unrecognized dataset type "{dataset_name}"')
 
     val_ratio = 0.1
-    val_size = int(len(ds)*val_ratio)
+    val_size = int(len(ds) * val_ratio)
     indices_val = list(range(0, val_size))
     indices_train = list(range(val_size, len(ds)))
 
-    val_set   = torch.utils.data.Subset(ds, indices_val)
+    val_set = torch.utils.data.Subset(ds, indices_val)
     train_set = torch.utils.data.Subset(ds, indices_train)
 
     # define the dataset loader (batch size, shuffling, ...)
-    collate_fn_device = lambda batch : DeviceDict(custom_collate(batch))
+    def collate_fn_device(batch):
+        return DeviceDict(custom_collate(batch))
 
     train_loader = torch.utils.data.DataLoader(
         train_set,
         batch_size=args.batchsize,
         num_workers=0,
-        pin_memory=False, # Note, setting pin_memory=False to avoid the pin_memory call
+        pin_memory=False,  # Note, setting pin_memory=False to avoid the pin_memory call
         shuffle=True,
         drop_last=True,
-        collate_fn=collate_fn_device
+        collate_fn=collate_fn_device,
     )
     val_loader = torch.utils.data.DataLoader(
         val_set,
@@ -174,18 +277,24 @@ def main():
         pin_memory=False,
         shuffle=True,
         drop_last=True,
-        collate_fn=collate_fn_device
+        collate_fn=collate_fn_device,
     )
 
-    loss_function = meanAndVarianceLoss if output_config.predict_variance else meanSquaredErrorLoss
+    loss_function = (
+        meanAndVarianceLoss if output_config.predict_variance else meanSquaredErrorLoss
+    )
 
     def validation_loss(the_network):
-        return compute_loss_on_dataset(the_network, val_loader, meanSquaredErrorLoss, output_config)
+        return compute_loss_on_dataset(
+            the_network, val_loader, meanSquaredErrorLoss, output_config
+        )
 
     model_path = os.environ.get("TRAINING_MODEL_PATH")
 
     if model_path is None or not os.path.exists(model_path):
-        raise Exception("Please set the TRAINING_MODEL_PATH environment variable to point to the desired model directory")     
+        raise Exception(
+            "Please set the TRAINING_MODEL_PATH environment variable to point to the desired model directory"
+        )
 
     def make_model_filename(label):
         assert isinstance(label, str)
@@ -200,12 +309,14 @@ def main():
     log_path_root = os.environ.get("TRAINING_LOG_PATH")
 
     if log_path_root is None or not os.path.exists(log_path_root):
-        raise Exception("Please set the TRAINING_LOG_PATH environment variable to point to the desired log directory")
+        raise Exception(
+            "Please set the TRAINING_LOG_PATH environment variable to point to the desired log directory"
+        )
 
     log_folder_name = f"{args.experiment}_{timestamp}"
 
     log_path = os.path.join(log_path_root, log_folder_name)
-    
+
     with SummaryWriter(log_path) as writer:
 
         if not args.nodisplay:
@@ -214,14 +325,14 @@ def main():
         fig, axes = plt.subplots(2, 4, figsize=(22, 10), dpi=80)
         fig.tight_layout(rect=(0.0, 0.05, 1.0, 0.95))
 
-        ax_t1 = axes[0,0]
-        ax_t2 = axes[0,1]
-        ax_t3 = axes[0,2]
-        ax_t4 = axes[0,3]
-        ax_b1 = axes[1,0]
-        ax_b2 = axes[1,1]
-        ax_b3 = axes[1,2]
-        ax_b4 = axes[1,3]
+        ax_t1 = axes[0, 0]
+        ax_t2 = axes[0, 1]
+        ax_t3 = axes[0, 2]
+        ax_t4 = axes[0, 3]
+        ax_b1 = axes[1, 0]
+        ax_b2 = axes[1, 1]
+        ax_b3 = axes[1, 2]
+        ax_b4 = axes[1, 3]
 
         num_epochs = 1000000
         losses = []
@@ -236,12 +347,14 @@ def main():
                 batch_gpu = batch_cpu.to(the_device)
 
                 pred_gpu = network(batch_gpu)
-                
+
                 loss, loss_terms = loss_function(batch_gpu, pred_gpu)
                 optimizer.zero_grad()
                 loss.backward()
 
-                torch.nn.utils.clip_grad_norm_(network.parameters(), maximum_gradient_norm)
+                torch.nn.utils.clip_grad_norm_(
+                    network.parameters(), maximum_gradient_norm
+                )
 
                 optimizer.step()
                 losses.append(loss.item())
@@ -249,7 +362,7 @@ def main():
                 writer.add_scalar("training loss", loss.item(), global_iteration)
                 for k in loss_terms.keys():
                     writer.add_scalar(k, loss_terms[k].item(), global_iteration)
-                
+
                 progress_bar((global_iteration) % args.plotinterval, args.plotinterval)
 
                 if ((global_iteration + 1) % args.validationinterval) == 0:
@@ -259,20 +372,29 @@ def main():
                         best_val_loss = curr_val_loss
                         if not args.nosave:
                             network.save(make_model_filename("best"))
-                            
+
                     if not args.nosave:
                         network.save(make_model_filename("latest"))
 
-
                     val_loss_x.append(len(losses))
                     val_loss_y.append(curr_val_loss)
-                    
-                    writer.add_scalar("validation loss", curr_val_loss, global_iteration)
+
+                    writer.add_scalar(
+                        "validation loss", curr_val_loss, global_iteration
+                    )
 
                 time_to_plot = ((global_iteration + 1) % args.plotinterval) == 0
 
                 if time_to_plot:
-                    print("Epoch {}, iteration {} of {} ({} %), loss={}".format(e, i, len(train_loader), 100*i//len(train_loader), losses[-1]))
+                    print(
+                        "Epoch {}, iteration {} of {} ({} %), loss={}".format(
+                            e,
+                            i,
+                            len(train_loader),
+                            100 * i // len(train_loader),
+                            losses[-1],
+                        )
+                    )
 
                 if time_to_plot:
                     val_batch_cpu = next(iter(val_loader))
@@ -289,49 +411,56 @@ def main():
                     ax_b4.cla()
 
                     # plt.gcf().suptitle(args.experiment)
-                        
+
                     # plot the input waveforms
                     ax_t1.title.set_text("Input (train)")
                     plot_inputs(ax_t1, batch_cpu, input_config)
                     ax_b1.title.set_text("Input (validation)")
                     plot_inputs(ax_b1, val_batch_cpu, input_config)
-                    
+
                     # plot the ground truth obstacles
                     ax_t2.title.set_text("Ground Truth (train)")
-                    plot_ground_truth(ax_t2, batch_cpu, output_config, show_samples=False)
+                    plot_ground_truth(
+                        ax_t2, batch_cpu, output_config, show_samples=False
+                    )
                     ax_b2.title.set_text("Ground Truth (validation)")
                     plot_ground_truth(ax_b2, val_batch_cpu, output_config)
-                    
+
                     # plot the predicted sdf
                     ax_t3.title.set_text("Prediction (train)")
                     plot_prediction(ax_t3, batch_gpu, network, output_config)
                     ax_b3.title.set_text("Prediction (validation)")
                     plot_prediction(ax_b3, val_batch_gpu, network, output_config)
-                    
+
                     # plot the training loss on a log plot
                     ax_t4.title.set_text("Training Loss")
                     ax_t4.scatter(range(len(losses)), losses, s=1.0)
                     if not args.predictvariance:
-                        ax_t4.set_yscale('log')
+                        ax_t4.set_yscale("log")
 
                     # plot the validation loss on a log plot
                     ax_b4.title.set_text("Validation Loss")
-                    ax_b4.set_yscale('log')
+                    ax_b4.set_yscale("log")
                     ax_b4.plot(val_loss_x, val_loss_y, c="Red")
 
                     # Note: calling show or pause will cause a bad time
                     fig.canvas.draw()
                     fig.canvas.flush_events()
 
-                    plt_screenshot(fig).save(log_path + "/image_" + str(global_iteration + 1) + ".png")
+                    plt_screenshot(fig).save(
+                        log_path + "/image_" + str(global_iteration + 1) + ".png"
+                    )
 
-                    if args.iterations is not None and global_iteration > args.iterations:
+                    if (
+                        args.iterations is not None
+                        and global_iteration > args.iterations
+                    ):
                         print("Done - desired iteration count was reached")
                         return
 
                 global_iteration += 1
 
-        plt.close('all')
+        plt.close("all")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,13 @@
 import fix_dead_command_line
 
 from featurize_audio import crop_audio_from_location
-from config import EmitterConfig, InputConfig, OutputConfig, ReceiverConfig, TrainingConfig
+from config import (
+    EmitterConfig,
+    InputConfig,
+    OutputConfig,
+    ReceiverConfig,
+    TrainingConfig,
+)
 import matplotlib.pyplot as plt
 import torch
 
@@ -25,8 +31,8 @@ def main():
     # example = wsds[120]
     example = wsds[500]
 
-    obs_list = example['obstacles_list']
-    audio = torch.tensor(example['input'])
+    obs_list = example["obstacles_list"]
+    audio = torch.tensor(example["input"])
 
     dummy_batch = {"obstacles_list": [obs_list]}
 
@@ -73,17 +79,16 @@ def main():
         nonlocal stay_open
         stay_open = False
 
-    cid_click = fig.canvas.mpl_connect('button_press_event', onclick)
-    cid_release = fig.canvas.mpl_connect('button_release_event', onrelease)
-    cid_move = fig.canvas.mpl_connect('motion_notify_event', onmove)
-    cid_close = fig.canvas.mpl_connect('close_event', on_close)
+    cid_click = fig.canvas.mpl_connect("button_press_event", onclick)
+    cid_release = fig.canvas.mpl_connect("button_release_event", onrelease)
+    cid_move = fig.canvas.mpl_connect("motion_notify_event", onmove)
+    cid_close = fig.canvas.mpl_connect("close_event", on_close)
 
     while stay_open:
         ax_l.cla()
         ax_r.cla()
 
-        audio_cropped = crop_audio_from_location(
-            audio, icfg, sample_y, sample_x)
+        audio_cropped = crop_audio_from_location(audio, icfg, sample_y, sample_x)
 
         ax_l.set_ylim(0.0, 1.0)
         ax_l.set_xlim(0, icfg.tof_crop_size)
@@ -108,13 +113,13 @@ def main():
             [marker_x - marker_size, marker_x + marker_size],
             [marker_y - marker_size, marker_y + marker_size],
             c="red",
-            linewidth=marker_thickness
+            linewidth=marker_thickness,
         )
         ax_r.plot(
             [marker_x - marker_size, marker_x + marker_size],
             [marker_y + marker_size, marker_y - marker_size],
             c="red",
-            linewidth=marker_thickness
+            linewidth=marker_thickness,
         )
 
         fig.canvas.draw()

@@ -1,6 +1,6 @@
 # adapted from PyTorch
 # see torch/utils/data/_utils/collate.py
-# 
+#
 # Modified so that the collate function leave plain lists alone
 
 import torch
@@ -8,12 +8,13 @@ from torch._six import container_abcs, string_classes, int_classes
 import re
 
 
-
-np_str_obj_array_pattern = re.compile(r'[SaUO]')
+np_str_obj_array_pattern = re.compile(r"[SaUO]")
 
 default_collate_err_msg_format = (
     "default_collate: batch must contain tensors, numpy arrays, numbers, "
-    "dicts or lists; found {}")
+    "dicts or lists; found {}"
+)
+
 
 def custom_collate(batch):
     r"""Puts each data field into a tensor with outer dimension batch size"""
@@ -29,9 +30,12 @@ def custom_collate(batch):
             storage = elem.storage()._new_shared(numel)
             out = elem.new(storage)
         return torch.stack(batch, 0, out=out)
-    elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
-            and elem_type.__name__ != 'string_':
-        if elem_type.__name__ == 'ndarray':
+    elif (
+        elem_type.__module__ == "numpy"
+        and elem_type.__name__ != "str_"
+        and elem_type.__name__ != "string_"
+    ):
+        if elem_type.__name__ == "ndarray":
             # array of string classes and object
             if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
                 raise TypeError(default_collate_err_msg_format.format(elem.dtype))
@@ -47,7 +51,7 @@ def custom_collate(batch):
         return batch
     elif isinstance(elem, container_abcs.Mapping):
         return {key: custom_collate([d[key] for d in batch]) for key in elem}
-    elif isinstance(elem, tuple) and hasattr(elem, '_fields'):  # namedtuple
+    elif isinstance(elem, tuple) and hasattr(elem, "_fields"):  # namedtuple
         return elem_type(*(custom_collate(samples) for samples in zip(*batch)))
     elif isinstance(elem, container_abcs.Sequence):
         ##########################################

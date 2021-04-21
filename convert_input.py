@@ -7,7 +7,9 @@ from featurize_audio import sclog, make_spectrogram, make_gcc
 
 
 def combine_emitted_signals(impulse_responses, emitter_config, receiver_config):
-    assert isinstance(impulse_responses, np.ndarray) or isinstance(impulse_responses, torch.Tensor)
+    assert isinstance(impulse_responses, np.ndarray) or isinstance(
+        impulse_responses, torch.Tensor
+    )
     assert impulse_responses.shape == (5, 8, wavesim_duration)
     assert isinstance(emitter_config, EmitterConfig)
     assert isinstance(receiver_config, ReceiverConfig)
@@ -28,7 +30,9 @@ def combine_emitted_signals(impulse_responses, emitter_config, receiver_config):
 
 def transform_received_signals(received_signals, input_config):
     assert isinstance(input_config, InputConfig)
-    assert isinstance(received_signals, np.ndarray) or isinstance(received_signals, torch.Tensor)
+    assert isinstance(received_signals, np.ndarray) or isinstance(
+        received_signals, torch.Tensor
+    )
     assert len(received_signals.shape) == 2
     assert received_signals.shape[1] == wavesim_duration
 

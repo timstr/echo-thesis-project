@@ -8,6 +8,7 @@ from featurize import make_deterministic_validation_batches_implicit
 from the_device import the_device, what_my_gpu_can_handle
 from progress_bar import progress_bar
 
+
 def meanSquaredErrorLoss(batch_gt, batch_pred):
     assert isinstance(batch_gt, DeviceDict)
     assert isinstance(batch_pred, DeviceDict)
@@ -15,8 +16,9 @@ def meanSquaredErrorLoss(batch_gt, batch_pred):
     x2 = batch_pred["output"][:, 0]
     assert x1.shape == x2.shape
     mse = torch.nn.functional.mse_loss(x1, x2)
-    terms = { "mean_squared_error": mse }
+    terms = {"mean_squared_error": mse}
     return mse, terms
+
 
 def meanAndVarianceLoss(batch_gt, batch_pred):
     assert isinstance(batch_gt, DeviceDict)
@@ -27,7 +29,7 @@ def meanAndVarianceLoss(batch_gt, batch_pred):
     sigma_hat = z_hat[:, 1]
 
     sqrt2pi = math.sqrt(2.0 * np.pi)
-    squared_error = (y - y_hat)**2
+    squared_error = (y - y_hat) ** 2
 
     #     phi(y|x)  = exp(-(y - y_hat)^2/(2*sigma^2))
     #                     / (sqrt(2*pi)*sigma)
@@ -39,7 +41,7 @@ def meanAndVarianceLoss(batch_gt, batch_pred):
     #                     - (log(sqrt(2*pi)) - log(1/sigma))
 
     sigma_hat_plus_epsilon = sigma_hat + 1e-2
-    log_numerator = -0.5 * squared_error / sigma_hat_plus_epsilon**2
+    log_numerator = -0.5 * squared_error / sigma_hat_plus_epsilon ** 2
     log_denominator = math.log(sqrt2pi) + torch.log(sigma_hat_plus_epsilon)
     log_phi = log_numerator - log_denominator
     nll = torch.mean(-log_phi)
@@ -47,7 +49,7 @@ def meanAndVarianceLoss(batch_gt, batch_pred):
     terms = {
         "mean_squared_error": torch.mean(squared_error).detach(),
         "mean_predicted_variance": mean_pred_var,
-        "negative_log_likelihood": nll.detach()
+        "negative_log_likelihood": nll.detach(),
     }
     return nll, terms
 
@@ -62,8 +64,10 @@ def compute_loss_on_dataset(model, dataset_loader, loss_function, output_config)
         is_implicit = model._output_config.implicit
         for i, batch in enumerate(dataset_loader):
             if is_implicit:
-                batches = make_deterministic_validation_batches_implicit(batch, output_config)
-                
+                batches = make_deterministic_validation_batches_implicit(
+                    batch, output_config
+                )
+
                 losses_batch = []
                 for b in batches:
                     b = b.to(the_device)
