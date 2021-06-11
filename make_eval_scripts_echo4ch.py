@@ -1,5 +1,5 @@
 import textwrap
-from config import output_format_depthmap, output_format_heatmap
+from config_constants import output_format_depthmap, output_format_heatmap
 
 
 def make_script(format, implicit, variance, summary_statistics):

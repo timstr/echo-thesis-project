@@ -1,6 +1,7 @@
 import pickle
 import torch
 import glob
+import random
 import os
 
 from convert_input import combine_emitted_signals, transform_received_signals
@@ -11,6 +12,8 @@ from config import (
     ReceiverConfig,
     TrainingConfig,
     example_should_be_used,
+)
+from config_constants import (
     output_format_depthmap,
     output_format_sdf,
     output_format_heatmap,
@@ -23,6 +26,7 @@ from featurize import (
     make_implicit_params_train,
     make_implicit_outputs,
     make_dense_outputs,
+    sdf_batch,
 )
 from device_dict import DeviceDict
 from progress_bar import progress_bar
@@ -109,31 +113,26 @@ class WaveSimDataset(torch.utils.data.Dataset):
         theDict = {"obstacles_list": obstacles, "input": the_input}
 
         if self._output_config.tof_cropping:
-            assert self._input_config.tof_cropping
-            assert self._output_config.dims == 2
-            assert self._output_config.format in [
-                output_format_sdf,
-                output_format_heatmap,
-            ]
-            assert self._input_config.format in [
-                input_format_audioraw,
-                input_format_audiowaveshaped,
-                input_format_gcc,
-                input_format_gccphat,
-            ]
-
             sample_location_yx = torch.rand(2)
+            if self._training_config.importance_sampling:
+                for _ in range(10):
+                    sdf_val = sdf_batch(
+                        sample_location_yx.unsqueeze(0), obstacles
+                    ).item()
+                    weight = 0.1 + 0.9 * (1.0 - round(min(1.0, abs(10.0 * sdf_val))))
+                    if random.random() < weight:
+                        break
+                    sample_location_yx = torch.rand(2)
+
             theDict["output"] = make_implicit_outputs(
-                obstacles, sample_location_yx.unsqueeze(0), self._output_config.format
+                obstacles, sample_location_yx.unsqueeze(0), self._output_config
             ).squeeze(0)
             theDict["params"] = sample_location_yx
 
         elif self._output_config.implicit:
             spe = self._training_config.samples_per_example
             params = make_implicit_params_train(spe, self._output_config.format)
-            output = make_implicit_outputs(
-                obstacles, params, self._output_config.format
-            )
+            output = make_implicit_outputs(obstacles, params, self._output_config)
 
             if (
                 self._training_config.importance_sampling
@@ -144,7 +143,9 @@ class WaveSimDataset(torch.utils.data.Dataset):
                     sdf = (
                         x
                         if self._output_config == output_format_sdf
-                        else make_implicit_outputs(obstacles, params, output_format_sdf)
+                        else make_implicit_outputs(
+                            obstacles, params, self._output_config
+                        )
                     )
                     return 0.1 + 0.9 * (
                         1.0 - torch.round(torch.clamp(torch.abs(10.0 * sdf), max=1.0))

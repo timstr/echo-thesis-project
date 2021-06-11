@@ -7,6 +7,8 @@ from config import (
     OutputConfig,
     ReceiverConfig,
     TrainingConfig,
+)
+from config_constants import (
     input_format_audioraw,
     input_format_gcc,
     output_format_sdf,
@@ -91,7 +93,9 @@ def main():
         ax_l.cla()
         ax_r.cla()
 
-        audio_cropped = crop_audio_from_location(audio, icfg, sample_y, sample_x)
+        audio_cropped = crop_audio_from_location(
+            audio.unsqueeze(2), icfg, sample_y, sample_x
+        )
 
         ax_l.set_ylim(0.0, 1.0)
         ax_l.set_xlim(0, icfg.tof_crop_size)

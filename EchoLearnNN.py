@@ -6,6 +6,8 @@ import torch.nn as nn
 from config import (
     InputConfig,
     OutputConfig,
+)
+from config_constants import (
     input_format_audioraw,
     input_format_audiowaveshaped,
     input_format_spectrogram,
@@ -151,7 +153,7 @@ class EchoLearnNN(nn.Module):
             else (intermediate_channels * intermediate_width)
         )
         fc_hidden = 128
-        fc_outputs = channels_out if self._output_config.tof_cropping else 512
+        fc_outputs = 512
 
         self.fullyConnected = nn.Sequential(
             makeFullyConnected(
@@ -160,11 +162,48 @@ class EchoLearnNN(nn.Module):
             makeFullyConnected(fc_hidden, fc_outputs, activation=False),
         )
 
-        if self._output_config.implicit:
+        if self._output_config.patch:
+            assert self._output_config.implicit or self._output_config.tof_cropping
+            patch_size = self._output_config.patch_size
+            if self._output_config.dims == 2:
+                convsUp = []
+                output_size = 4
+                while output_size < self._output_config.patch_size:
+                    convsUp.append(
+                        makeConvUp(
+                            in_channels=32, out_channels=32, scale_factor=2, dims=2
+                        )
+                    )
+                    convsUp.append(
+                        makeConvSame(
+                            in_channels=32, out_channels=32, kernel_size=3, dims=2
+                        )
+                    )
+                    output_size *= 2
+                finalShape = (
+                    (fc_outputs // 16),
+                    patch_size,
+                    patch_size,
+                )
+                self.final = nn.Sequential(
+                    Reshape((fc_outputs,), ((fc_outputs // 16), 4, 4)),
+                    *convsUp,
+                    Reshape(finalShape, finalShape),  # sanity check
+                    makeConvSame(
+                        in_channels=(fc_outputs // 16),
+                        out_channels=channels_out,
+                        kernel_size=1,
+                        dims=2,
+                        activation=False,
+                    ),
+                )
+            else:
+                raise Exception(
+                    "Patched predictions for 1D outputs are not yet implemented."
+                    "Please tell Tim to implement patch mode for 1D outputs"
+                )
+        elif self._output_config.implicit or self._output_config.tof_cropping:
             self.final = makeFullyConnected(512, channels_out, activation=False)
-        elif self._output_config.tof_cropping:
-            # Hahahahaha
-            self.final = None
         elif dims_out == 1:
             assert self._output_config.resolution >= 16
             convsFlex = ()
@@ -222,8 +261,22 @@ class EchoLearnNN(nn.Module):
 
         if self._input_config.tof_cropping:
             locations_yx = d["params"]
-            assert locations_yx.shape == (B, 2)
-            w0 = crop_audio_from_location_batch(w0, self._input_config, locations_yx)
+            assert locations_yx.shape == (B, 2) or locations_yx.shape == (1, 2)
+            if locations_yx.shape[0] == 1 and B > 1:
+                batch_into_features = w0.permute(1, 0, 2).unsqueeze(0)
+                cropped = crop_audio_from_location_batch(
+                    batch_into_features, self._input_config, locations_yx
+                )
+                w0 = cropped.squeeze(0).permute(1, 0, 2)
+            else:
+                w0 = crop_audio_from_location_batch(
+                    w0.unsqueeze(2), self._input_config, locations_yx
+                ).squeeze(2)
+            assert w0.shape == (
+                B,
+                self._input_config.num_channels,
+                self._input_config.tof_crop_size,
+            )
 
             # w0_flat = w0.reshape(B, self._input_config.num_channels * self._input_config.tof_crop_size)
             # output = self.fullyConnected(w0_flat)
@@ -231,9 +284,11 @@ class EchoLearnNN(nn.Module):
             conved = self.convIn(w0)
             conved_flat = conved.reshape(B, -1)
 
-            output = self.fullyConnected(conved_flat)
+            fc_output = self.fullyConnected(conved_flat)
+            output = self.final(fc_output)
 
-            assert output.shape == (B, self._output_config.num_channels)
+            self.check_final_shape(output)
+
             output = self.scale_variance(output)
             return DeviceDict({"output": output})
 
@@ -293,12 +348,12 @@ class EchoLearnNN(nn.Module):
             outputs_flat = self.final(v0)
             output = outputs_flat.reshape(B, param_batch_size, out_channels)
             output = output.permute(0, 2, 1)
-            assert output.shape == (B, out_channels, param_batch_size)
+            self.check_final_shape(output)
         else:
             v0 = fc_input
             v1 = self.fullyConnected(v0)
             output = self.final(v1)
-            assert output.shape == ((B, out_channels) + ((res,) * out_dims))
+            self.check_final_shape(output)
 
         output = self.scale_variance(output)
 
@@ -322,6 +377,18 @@ class EchoLearnNN(nn.Module):
         )[0]
 
         return torch.cat((mean, variance), dim=1)
+
+    def check_final_shape(self, output):
+        if self._output_config.patch:
+            spatial_dims = (self._output_config.patch_size,) * self._output_config.dims
+            expected_shape = (self._output_config.num_channels,) + spatial_dims
+            assert output.shape[1:] == expected_shape
+        elif self._output_config.implicit or self._output_config.tof_cropping:
+            assert output.shape[1:] == (self._output_config.num_channels,)
+        else:
+            spatial_dims = (self._output_config.patch_size,) * self._output_config.dims
+            expected_shape = (self._output_config.num_channels,) + spatial_dims
+            assert output.shape[1:] == expected_shape
 
     def save(self, filename):
         print(f'Saving model to "{filename}"')

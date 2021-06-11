@@ -18,6 +18,8 @@ from config import (
     OutputConfig,
     ReceiverConfig,
     TrainingConfig,
+)
+from config_constants import (
     input_format_all,
     receiver_arrangement_all,
     receiver_arrangement_grid,
@@ -168,6 +170,9 @@ def main():
     parser.add_argument(
         "--restoremodelpath", type=str, dest="restoremodelpath", default=None
     )
+    parser.add_argument(
+        "--patchsize", type=int, dest="patchsize", required=False, default=None
+    )
 
     args = parser.parse_args()
 
@@ -204,6 +209,7 @@ def main():
         implicit=args.implicitfunction,
         predict_variance=args.predictvariance,
         tof_cropping=args.tofcropping,
+        patch_size=args.patchsize,
         resolution=args.resolution,
         using_echo4ch=using_echo4ch,
     )
@@ -352,6 +358,9 @@ def main():
             train_iter = iter(train_loader)
             for i in range(len(train_loader)):
                 batch_cpu = next(train_iter)
+                # HACK
+                # TODO: make this nice later
+                batch_cpu["params"] = batch_cpu["params"][:1]
                 batch_gpu = batch_cpu.to(the_device)
 
                 pred_gpu = network(batch_gpu)
@@ -391,7 +400,9 @@ def main():
                         "validation loss", curr_val_loss, global_iteration
                     )
 
-                time_to_plot = ((global_iteration + 1) % args.plotinterval) == 0
+                time_to_plot = ((global_iteration + 1) % args.plotinterval) == 0 or (
+                    global_iteration == 0
+                )
 
                 if time_to_plot:
                     print(

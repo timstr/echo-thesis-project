@@ -19,6 +19,8 @@ from config import (
     OutputConfig,
     ReceiverConfig,
     TrainingConfig,
+)
+from config_constants import (
     input_format_all,
     receiver_arrangement_all,
     emitter_format_all,

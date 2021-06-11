@@ -1,16 +1,3 @@
-import math
-import numpy as np
-
-from config import (
-    emitter_arrangement_all,
-    emitter_arrangement_mono,
-    emitter_arrangement_stereo,
-    emitter_arrangement_surround,
-    receiver_arrangement_all,
-    receiver_arrangement_flat,
-    receiver_arrangement_grid,
-)
-
 wavesim_field_size = 512
 wavesim_duration = 2048
 
@@ -38,6 +25,13 @@ wavesim_receiver_locations = [
 
 
 def make_emitter_indices(arrangement):
+    from config_constants import (
+        emitter_arrangement_all,
+        emitter_arrangement_mono,
+        emitter_arrangement_stereo,
+        emitter_arrangement_surround,
+    )
+
     assert arrangement in emitter_arrangement_all
     if arrangement == emitter_arrangement_mono:
         return [2]
@@ -50,6 +44,12 @@ def make_emitter_indices(arrangement):
 
 
 def make_receiver_indices(num_receivers, arrangement):
+    from config_constants import (
+        receiver_arrangement_all,
+        receiver_arrangement_flat,
+        receiver_arrangement_grid,
+    )
+
     assert num_receivers in [1, 2, 4, 8]
     assert arrangement in receiver_arrangement_all
 

@@ -6,6 +6,8 @@ from config import (
     OutputConfig,
     ReceiverConfig,
     TrainingConfig,
+)
+from config_constants import (
     input_format_spectrogram,
     output_format_sdf,
 )

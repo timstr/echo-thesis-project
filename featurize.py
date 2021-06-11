@@ -1,7 +1,7 @@
 from EchoLearnNN import EchoLearnNN
-from config import (
-    OutputConfig,
-    wavesim_duration,
+from config import OutputConfig
+from wavesim_params import wavesim_duration
+from config_constants import (
     output_format_sdf,
     output_format_heatmap,
     output_format_depthmap,
@@ -121,7 +121,7 @@ def sdf_batch_one_shape(coordinates_yx_batch, shape_tuple):
         raise Exception("Unknown shape type")
 
 
-def sdf_batch(coordinates_yx_batch, obs):
+def sdf_batch(coordinates_yx_batch, obs, max_dist=0.125):
     assert len(obs) > 0
     vals = sdf_batch_one_shape(coordinates_yx_batch, obs[0])
     for o in obs[1:]:
@@ -129,6 +129,8 @@ def sdf_batch(coordinates_yx_batch, obs):
             torch.stack((vals, sdf_batch_one_shape(coordinates_yx_batch, o)), dim=1),
             dim=1,
         )[0]
+    if max_dist is not None:
+        return torch.clamp(vals, min=-max_dist, max=max_dist)
     return vals
 
 
@@ -647,6 +649,60 @@ def make_dense_tof_cropped_output_pred(example, network, output_config):
     return outputs.permute(1, 0).reshape(num_output_dims, res, res).detach().cpu()
 
 
+def make_dense_tof_cropped_patch_output_pred(example, network, output_config):
+    assert isinstance(example, DeviceDict)
+    assert isinstance(network, EchoLearnNN)
+    assert isinstance(output_config, OutputConfig)
+    assert output_config.patch
+    # simple approach, no overlapping for now
+    if output_config.dims != 2:
+        raise Exception("I don't want to do this right now")
+    num_splits = output_config.resolution // output_config.patch_size
+    fake_batch_size = num_splits ** 2
+    ls = torch.linspace(
+        start=(0.5 / num_splits),
+        end=((num_splits - 0.5) / num_splits),
+        steps=num_splits,
+    )
+    patch_centers = torch.stack(torch.meshgrid(ls, ls), dim=2)
+    assert patch_centers.shape == (num_splits, num_splits, 2)
+    patch_centers = patch_centers.reshape(fake_batch_size, 2)
+    d = DeviceDict(
+        {
+            "input": example["input"][:1].expand(fake_batch_size, -1, -1),
+            "params": patch_centers,
+        }
+    )
+    pred = network(d)["output"]
+    assert pred.shape == (
+        fake_batch_size,
+        output_config.num_channels,
+        output_config.patch_size,
+        output_config.patch_size,
+    )
+    patches_xy = pred.reshape(
+        num_splits,
+        num_splits,
+        output_config.num_channels,
+        output_config.patch_size,
+        output_config.patch_size,
+    )
+    rows_x = torch.cat([patches_xy[i] for i in range(num_splits)], dim=2)
+    assert rows_x.shape == (
+        num_splits,
+        output_config.num_channels,
+        output_config.resolution,
+        output_config.patch_size,
+    )
+    img = torch.cat([rows_x[i] for i in range(num_splits)], dim=2)
+    assert img.shape == (
+        output_config.num_channels,
+        output_config.resolution,
+        output_config.resolution,
+    )
+    return img
+
+
 def make_dense_implicit_output_pred(example, network, output_config):
     assert isinstance(example, DeviceDict)
     assert isinstance(network, EchoLearnNN)
@@ -839,19 +895,83 @@ def make_implicit_params_validation(img_size, dims):
         )
 
 
-def make_implicit_outputs(obs, params, representation):
+def make_implicit_outputs(obs, params, output_config):
+    assert isinstance(obs, list)
+    assert isinstance(params, torch.Tensor)
+    assert isinstance(output_config, OutputConfig)
     assert len(params.shape) == 2
-    if representation == output_format_sdf:
-        assert params.shape[1] == 2
-        return sdf_batch(params.permute(1, 0), obs)
-    elif representation == output_format_heatmap:
-        assert params.shape[1] == 2
-        return heatmap_batch(params.permute(1, 0), obs)
-    elif representation == output_format_depthmap:
-        assert params.shape[1] == 1
-        return lines_of_sight_from_bottom_up(obs, params[:, 0])
+    N = params.shape[0]
+
+    if output_config.patch:
+        extent = output_config.patch_size / output_config.resolution
+        # print(f"patch size = {output_config.patch_size}")
+        # print(f"resolution = {output_config.resolution}")
+        # print(f" => extent = {extent}")
+        offsets = torch.linspace(
+            start=-0.5 * extent, end=0.5 * extent, steps=output_config.patch_size + 1
+        )[:-1]
+        assert offsets.shape == (output_config.patch_size,)
+        # print(f"offsets = {offsets}")
+
+        if output_config.dims == 1:
+            assert params.shape == (N, 1)
+            params_with_offset = params + offsets.unsqueeze(0)
+            assert params_with_offset.shape == (N, output_config.patch_size)
+            implicit_inputs = params_with_offset.reshape(
+                1, N * output_config.patch_size
+            )
+            assert implicit_inputs.shape == (1, N * output_config.patch_size)
+        elif output_config.dims == 2:
+            assert params.shape == (N, 2)
+            offsets_square = torch.stack(torch.meshgrid(offsets, offsets), dim=2)
+            assert offsets_square.shape == (
+                output_config.patch_size,
+                output_config.patch_size,
+                2,
+            )
+            offsets_flat = offsets_square.reshape(output_config.patch_size ** 2, 2)
+            params_with_offset = params.unsqueeze(1) + offsets_flat.unsqueeze(0)
+            assert params_with_offset.shape == (N, output_config.patch_size ** 2, 2)
+            implicit_inputs = params_with_offset.reshape(
+                N * output_config.patch_size ** 2, 2
+            ).permute(1, 0)
+            assert implicit_inputs.shape == (2, N * output_config.patch_size ** 2)
+        else:
+            raise Exception("Unrecognized output dimensionality")
+    else:
+        if output_config.dims == 1:
+            assert params.shape == (N, 1)
+            implicit_inputs = params.permute(1, 0)
+            assert implicit_inputs.shape == (1, N)
+        elif output_config.dims == 2:
+            assert params.shape == (N, 2)
+            implicit_inputs = params.permute(1, 0)
+            assert implicit_inputs.shape == (2, N)
+        else:
+            raise Exception("Unrecognized output dimensionality")
+
+    if output_config.format == output_format_sdf:
+        implicit_outputs = sdf_batch(implicit_inputs, obs)
+    elif output_config.format == output_format_heatmap:
+        implicit_outputs = heatmap_batch(implicit_inputs, obs)
+    elif output_config.format == output_format_depthmap:
+        implicit_outputs = lines_of_sight_from_bottom_up(obs, implicit_inputs)
     else:
         raise Exception("Unrecognized representation")
+
+    if output_config.patch:
+        if output_config.dims == 1:
+            assert implicit_outputs.shape == (N * output_config.patch_size,)
+            return implicit_outputs.reshape(N, output_config.patch_size)
+        elif output_config.dims == 2:
+            assert implicit_outputs.shape == (N * output_config.patch_size ** 2,)
+            return implicit_outputs.reshape(
+                N, output_config.patch_size, output_config.patch_size
+            )
+        else:
+            raise Exception("Unrecognized output dimensionality")
+    else:
+        return implicit_outputs
 
 
 def make_dense_outputs(obs, representation, img_size):

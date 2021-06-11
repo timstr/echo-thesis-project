@@ -3,8 +3,9 @@ import scipy.signal
 import numpy as np
 import math
 
-from config import InputConfig, wavesim_duration
+from config import InputConfig
 from wavesim_params import (
+    wavesim_duration,
     wavesim_field_size,
     wavesim_speed_of_sound,
     wavesim_emitter_locations,
@@ -112,7 +113,12 @@ def crop_audio_from_location(received_signals, input_config, sample_y, sample_x)
 
     receiver_indices = input_config.receiver_config.indices
 
-    assert received_signals.shape == (len(receiver_indices), wavesim_duration)
+    feature_dims = received_signals.shape[1]
+    assert received_signals.shape == (
+        len(receiver_indices),
+        feature_dims,
+        wavesim_duration,
+    )
     assert input_config.tof_cropping
 
     window_size = input_config.tof_crop_size
@@ -155,18 +161,18 @@ def crop_audio_from_location(received_signals, input_config, sample_y, sample_x)
         signal = received_signals[signal_index]
         window = torch.cat(
             (
-                torch.zeros(start_padding_size, device=signal.device),
-                signal[window_start:window_end],
-                torch.zeros(end_padding_size, device=signal.device),
+                torch.zeros((feature_dims, start_padding_size), device=signal.device),
+                signal[:, window_start:window_end],
+                torch.zeros((feature_dims, end_padding_size), device=signal.device),
             ),
-            dim=0,
+            dim=1,
         )
 
         windowed_signals.append(window)
 
     windowed_signals = torch.stack(windowed_signals, dim=0)
 
-    assert windowed_signals.shape == (len(receiver_indices), window_size)
+    assert windowed_signals.shape == (len(receiver_indices), feature_dims, window_size)
 
     return windowed_signals
 
@@ -178,9 +184,11 @@ def crop_audio_from_location_batch(
     assert isinstance(input_config, InputConfig)
     assert isinstance(locations_yx_batch, torch.Tensor)
     B = received_signals_batch.shape[0]
+    F = received_signals_batch.shape[2]
     assert received_signals_batch.shape == (
         B,
         len(input_config.receiver_config.indices),
+        F,
         wavesim_duration,
     )
     assert locations_yx_batch.shape == (B, 2)
@@ -200,6 +208,7 @@ def crop_audio_from_location_batch(
     assert cropped.shape == (
         B,
         len(input_config.receiver_config.indices),
+        F,
         input_config.tof_crop_size,
     )
     return cropped

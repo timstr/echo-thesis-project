@@ -14,9 +14,11 @@ from argparse import ArgumentParser
 
 from the_device import the_device
 from wave_field import Field
-from config import (
+from wavesim_params import (
     wavesim_field_size,
     wavesim_duration,
+)
+from config_constants import (
     wavesim_emitter_locations,
     wavesim_receiver_locations,
 )

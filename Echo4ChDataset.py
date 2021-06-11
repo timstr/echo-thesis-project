@@ -5,6 +5,8 @@ from config import (
     OutputConfig,
     ReceiverConfig,
     TrainingConfig,
+)
+from config_constants import (
     emitter_arrangement_mono,
     emitter_format_sweep,
     receiver_arrangement_grid,

@@ -1,6 +1,6 @@
 import textwrap
 import os
-from config import input_format_audioraw, input_format_gcc
+from config_constants import input_format_audioraw, input_format_gcc
 
 out_folder = "job_scripts"
 

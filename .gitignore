@@ -10,3 +10,5 @@ models/
 *.sh
 job_scripts/
 images/
+**/*.h5
+**/*.npz

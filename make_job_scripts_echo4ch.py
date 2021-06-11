@@ -1,6 +1,6 @@
 import textwrap
 import os
-from config import output_format_depthmap, output_format_heatmap
+from config_constants import output_format_depthmap, output_format_heatmap
 
 out_folder = "job_scripts"
 

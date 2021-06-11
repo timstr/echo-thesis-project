@@ -1,6 +1,6 @@
 import textwrap
 import os
-from config import (
+from config_constants import (
     input_format_audioraw,
     input_format_audiowaveshaped,
     input_format_gccphat,

@@ -4,13 +4,7 @@ import numpy as np
 from wavesim_params import make_emitter_indices, make_receiver_indices, wavesim_duration
 from shape_types import CIRCLE
 
-emitter_beep_sweep_len = wavesim_duration // 16
-emitter_sequential_delay = wavesim_duration // 8
-
-emitter_format_beep = "beep"
-emitter_format_sweep = "sweep"
-emitter_format_impulse = "impulse"
-emitter_format_all = [emitter_format_beep, emitter_format_sweep, emitter_format_impulse]
+from config_constants import *
 
 
 def make_emitter_signal(frequency_index, delay, format):
@@ -37,16 +31,6 @@ def make_emitter_signal(frequency_index, delay, format):
     else:
         raise Exception("Unrecognized signal format")
     return out
-
-
-emitter_arrangement_mono = "mono"
-emitter_arrangement_stereo = "stereo"
-emitter_arrangement_surround = "surround"
-emitter_arrangement_all = [
-    emitter_arrangement_mono,
-    emitter_arrangement_stereo,
-    emitter_arrangement_surround,
-]
 
 
 class EmitterConfig:
@@ -85,11 +69,6 @@ class EmitterConfig:
         print(f"  same frequency?          : {self.sequential}")
 
 
-receiver_arrangement_flat = "flat"
-receiver_arrangement_grid = "grid"
-receiver_arrangement_all = [receiver_arrangement_flat, receiver_arrangement_grid]
-
-
 class ReceiverConfig:
     def __init__(self, arrangement=receiver_arrangement_grid, count=8):
         assert (arrangement, count) in [
@@ -109,20 +88,6 @@ class ReceiverConfig:
         print(f"  count                    : {self.count}")
 
 
-input_format_audioraw = "audioraw"
-input_format_audiowaveshaped = "audiowaveshaped"
-input_format_spectrogram = "spectrogram"
-input_format_gcc = "gcc"
-input_format_gccphat = "gccphat"
-input_format_all = [
-    input_format_audioraw,
-    input_format_audiowaveshaped,
-    input_format_spectrogram,
-    input_format_gcc,
-    input_format_gccphat,
-]
-
-
 class InputConfig:
     def __init__(
         self,
@@ -137,6 +102,12 @@ class InputConfig:
         assert isinstance(emitter_config, EmitterConfig)
         assert isinstance(receiver_config, ReceiverConfig)
         assert tof_crop_size is None or isinstance(tof_crop_size, int)
+        assert tof_crop_size is None or format in [
+            input_format_audioraw,
+            input_format_audiowaveshaped,
+            input_format_gcc,
+            input_format_gccphat,
+        ]
 
         self.format = format
         # HACK to simplify emitter arrangements (only mono is being used right now)
@@ -167,12 +138,6 @@ class InputConfig:
         print(f"  time-of-flight crop size : {self.tof_crop_size}")
 
 
-output_format_depthmap = "depthmap"
-output_format_heatmap = "heatmap"
-output_format_sdf = "sdf"
-output_format_all = [output_format_depthmap, output_format_heatmap, output_format_sdf]
-
-
 class OutputConfig:
     def __init__(
         self,
@@ -180,6 +145,7 @@ class OutputConfig:
         implicit=True,
         predict_variance=True,
         tof_cropping=False,
+        patch_size=None,
         resolution=1024,
         using_echo4ch=False,
     ):
@@ -188,12 +154,17 @@ class OutputConfig:
         assert isinstance(predict_variance, bool)
         assert isinstance(using_echo4ch, bool)
         assert isinstance(tof_cropping, bool)
+        assert patch_size in [None, 4, 8, 16, 32, 64, 128]
         assert not (implicit and tof_cropping)
+        assert (patch_size is None) or (implicit or tof_cropping)
         assert resolution in [32, 64, 128, 256, 512, 1024]
+        assert not tof_cropping or format in [output_format_heatmap, output_format_sdf]
         self.format = format
         self.implicit = implicit
         self.predict_variance = predict_variance
         self.tof_cropping = tof_cropping
+        self.patch = patch_size is not None
+        self.patch_size = patch_size
         self.resolution = resolution
         self.using_echo4ch = using_echo4ch
 
@@ -212,6 +183,8 @@ class OutputConfig:
         print(f"  implicit function?       : {self.implicit}")
         print(f"  predict variance?        : {self.predict_variance}")
         print(f"  time-of-flight cropping? : {self.tof_cropping}")
+        print(f"  patch?                   : {self.patch}")
+        print(f"  -> patch size            : {self.patch_size}")
         print(f"  resolution               : {self.resolution}")
         print(f"  -> dimensions            : {self.dims}")
         print(f"  -> implicit parameters   : {self.num_implicit_params}")

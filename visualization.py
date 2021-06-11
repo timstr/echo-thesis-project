@@ -8,6 +8,8 @@ from device_dict import DeviceDict
 from config import (
     InputConfig,
     OutputConfig,
+)
+from config_constants import (
     output_format_sdf,
     output_format_heatmap,
     output_format_depthmap,
@@ -15,6 +17,7 @@ from config import (
 from EchoLearnNN import EchoLearnNN
 from featurize import (
     make_dense_implicit_output_pred,
+    make_dense_tof_cropped_patch_output_pred,
     make_dense_tof_cropped_output_pred,
     make_depthmap_gt,
     make_echo4ch_dense_implicit_output_pred,
@@ -38,8 +41,8 @@ def plot_inputs(plt_axis, batch, input_config):
             location_y = 0.5
             location_x = 0.5
             the_input_cropped = crop_audio_from_location(
-                the_input, input_config, location_y, location_x
-            )
+                the_input.unsqueeze(1), input_config, location_y, location_x
+            ).squeeze(1)
             for j in range(input_config.num_channels):
                 top = j / input_config.num_channels
                 bottom = (j + 1) / input_config.num_channels
@@ -150,10 +153,10 @@ def plot_image(plt_axis, img, display_fn, output_config, checkerboard_size=8):
     assert H == W
     N = H
     with torch.no_grad():
-        y = img[0]
-        plt_axis.imshow(display_fn(y), interpolation="bicubic")
+        y = img[0].cpu()
+        plt_axis.imshow(display_fn(y).numpy(), interpolation="bicubic")
         if output_config.predict_variance:
-            sigma = img[1]
+            sigma = img[1].cpu()
             sigma_clamped = torch.clamp(sigma, 0.0, 1.0)
             gamma_value = 0.5
             sigma_curved = sigma_clamped ** gamma_value
@@ -198,48 +201,20 @@ def plot_prediction(plt_axis, batch, network, output_config):
     assert isinstance(batch, DeviceDict)
     assert isinstance(network, EchoLearnNN)
     assert isinstance(output_config, OutputConfig)
+    if output_config.using_echo4ch:
+        plot_prediction_echo4ch(plt_axis, batch, network, output_config)
+        return
+
     with torch.no_grad():
-        if output_config.using_echo4ch:
-            if output_config.implicit:
-                output = make_echo4ch_dense_implicit_output_pred(
+        if output_config.tof_cropping:
+            if output_config.patch:
+                output = make_dense_tof_cropped_patch_output_pred(
                     batch, network, output_config
                 )
             else:
-                output = network(batch)["output"][0]
-            if output_config.format == output_format_depthmap:
-                output[0] = (
-                    1.0 - output[0]
-                )  # To invert colours (purple is far, yellow (object) is near)
-            elif output_config.format == output_format_heatmap:
-                assert output.shape == (output_config.num_channels, 64, 64, 64)
-                output_as_minibatch = output.permute(1, 0, 2, 3)
-                output_grid = torchvision.utils.make_grid(
-                    output_as_minibatch[:, 0:1].repeat(1, 3, 1, 1),
-                    nrow=8,
-                    pad_value=0.25,
-                )[:1]
-                if output_config.predict_variance:
-                    output_variance_grid = torchvision.utils.make_grid(
-                        output_as_minibatch[:, 1:2].repeat(1, 3, 1, 1), nrow=8
-                    )[:1]
-                    output_grid = torch.cat((output_grid, output_variance_grid), dim=0)
-                output = output_grid
-                assert len(output.shape) == 3
-            output = output.cpu().detach()
-            checkerboard_size = (
-                2 if (output_config.format == output_format_depthmap) else 8
-            )
-            plot_image(
-                plt_axis,
-                output,
-                purple_yellow,
-                output_config,
-                checkerboard_size=checkerboard_size,
-            )
-            return
-
-        if output_config.tof_cropping:
-            output = make_dense_tof_cropped_output_pred(batch, network, output_config)
+                output = make_dense_tof_cropped_output_pred(
+                    batch, network, output_config
+                )
         elif output_config.implicit:
             output = make_dense_implicit_output_pred(batch, network, output_config)
         else:
@@ -253,6 +228,48 @@ def plot_prediction(plt_axis, batch, network, output_config):
             plot_depthmap(plt_axis, output, output_config)
         else:
             raise Exception("Unrecognized output representation")
+
+
+def plot_prediction_echo4ch(plt_axis, batch, network, output_config):
+    assert isinstance(batch, DeviceDict)
+    assert isinstance(network, EchoLearnNN)
+    assert isinstance(output_config, OutputConfig)
+    assert output_config.using_echo4ch
+    with torch.no_grad():
+        if output_config.implicit:
+            output = make_echo4ch_dense_implicit_output_pred(
+                batch, network, output_config
+            )
+        else:
+            output = network(batch)["output"][0]
+        if output_config.format == output_format_depthmap:
+            output[0] = (
+                1.0 - output[0]
+            )  # To invert colours (purple is far, yellow (object) is near)
+        elif output_config.format == output_format_heatmap:
+            assert output.shape == (output_config.num_channels, 64, 64, 64)
+            output_as_minibatch = output.permute(1, 0, 2, 3)
+            output_grid = torchvision.utils.make_grid(
+                output_as_minibatch[:, 0:1].repeat(1, 3, 1, 1),
+                nrow=8,
+                pad_value=0.25,
+            )[:1]
+            if output_config.predict_variance:
+                output_variance_grid = torchvision.utils.make_grid(
+                    output_as_minibatch[:, 1:2].repeat(1, 3, 1, 1), nrow=8
+                )[:1]
+                output_grid = torch.cat((output_grid, output_variance_grid), dim=0)
+            output = output_grid
+            assert len(output.shape) == 3
+        output = output.cpu().detach()
+        checkerboard_size = 2 if (output_config.format == output_format_depthmap) else 8
+        plot_image(
+            plt_axis,
+            output,
+            purple_yellow,
+            output_config,
+            checkerboard_size=checkerboard_size,
+        )
 
 
 def plt_screenshot(plt_figure):
