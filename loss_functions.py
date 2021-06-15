@@ -6,7 +6,7 @@ import numpy as np
 from EchoLearnNN import EchoLearnNN
 from featurize import make_deterministic_validation_batches_implicit
 from the_device import the_device, what_my_gpu_can_handle
-from progress_bar import progress_bar
+from utils import progress_bar
 
 
 def meanSquaredErrorLoss(batch_gt, batch_pred):

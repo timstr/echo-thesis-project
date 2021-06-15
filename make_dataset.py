@@ -22,7 +22,7 @@ from config_constants import (
     wavesim_emitter_locations,
     wavesim_receiver_locations,
 )
-from progress_bar import progress_bar
+from utils import progress_bar
 
 
 def main():

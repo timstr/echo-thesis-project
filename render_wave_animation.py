@@ -4,7 +4,7 @@ import matplotlib.animation
 import matplotlib.pyplot as plt
 
 from wave_field import Field, make_random_field
-from progress_bar import progress_bar
+from utils import progress_bar
 
 from config_constants import wavesim_emitter_locations, wavesim_receiver_locations
 

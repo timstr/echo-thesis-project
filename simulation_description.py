@@ -1,4 +1,7 @@
+from assert_eq import assert_eq
 import datetime
+import os
+import subprocess
 from kwave_util import (
     encode_str,
     make_ball,
@@ -8,6 +11,8 @@ from kwave_util import (
     write_scalar_for_kwave,
 )
 import numpy as np
+import scipy.interpolate as interpolate
+import scipy.signal as signal
 
 import h5py
 
@@ -35,8 +40,8 @@ class SimulationDescription:
         output_length,
         air_properties,
         obstacle_properties,
-        sensor_locations,
-        impulse_location,
+        sensor_indices,
+        emitter_indices,
     ):
         assert isinstance(Nx, int)
         assert isinstance(Ny, int)
@@ -50,7 +55,7 @@ class SimulationDescription:
         assert isinstance(output_length, int)
         assert isinstance(air_properties, AcousticMediumProperties)
         assert isinstance(obstacle_properties, AcousticMediumProperties)
-        assert isinstance(sensor_locations, list)
+        assert isinstance(sensor_indices, list)
         assert all(
             [
                 isinstance(i, int)
@@ -59,21 +64,23 @@ class SimulationDescription:
                 and (i >= 0 and i < Nx)
                 and (j >= 0 and j < Ny)
                 and (k >= 0 and k < Nz)
-                for i, j, k in sensor_locations
+                for i, j, k in sensor_indices
             ]
         )
-        assert isinstance(impulse_location, tuple)
-        assert len(impulse_location) == 3
-        assert isinstance(impulse_location[0], int)
-        assert isinstance(impulse_location[1], int)
-        assert isinstance(impulse_location[2], int)
+        assert isinstance(emitter_indices, tuple)
+        assert len(emitter_indices) == 3
+        assert isinstance(emitter_indices[0], int)
+        assert isinstance(emitter_indices[1], int)
+        assert isinstance(emitter_indices[2], int)
 
         self.Nx = Nx
         self.Ny = Ny
         self.Nz = Nz
+
         self.dx = dx
         self.dy = dy
         self.dz = dz
+
         self.Npml = Npml
 
         self.Nx_total = Nx + 2 * Npml
@@ -91,13 +98,39 @@ class SimulationDescription:
 
         self.air_properties = air_properties
         self.obstacle_properties = obstacle_properties
-        self.sensor_locations = sensor_locations
-        self.num_sensors = len(sensor_locations)
+        self.sensor_count = len(sensor_indices)
         self.sensor_indices = np.array(
-            [self.make_simulation_index(x, y, z) for x, y, z in sensor_locations]
+            [[x, y, z] for x, y, z in sensor_indices], dtype=np.uint32
+        )
+        self.sensor_indices_flat = np.array(
+            [self.make_simulation_index_flat(x, y, z) for x, y, z in sensor_indices]
         )[np.newaxis, np.newaxis, :]
-        assert self.sensor_indices.shape == (1, 1, len(sensor_locations))
-        self.impulse_location = impulse_location
+        assert self.sensor_indices_flat.shape == (1, 1, len(sensor_indices))
+        self.emitter_indices = np.array(emitter_indices, dtype=np.uint32)
+
+        self.xmin = -emitter_indices[0] * self.dx
+        self.ymin = -emitter_indices[1] * self.dy
+        self.zmin = -emitter_indices[2] * self.dz
+        self.xmax = (self.Nx - emitter_indices[0]) * self.dx
+        self.ymax = (self.Ny - emitter_indices[1]) * self.dy
+        self.zmax = (self.Nz - emitter_indices[2]) * self.dz
+
+        self.emitter_location = np.zeros((3,), dtype=np.float32)
+
+        self.sensor_locations = np.array(
+            [
+                [
+                    (x - emitter_indices[0]) * dx,
+                    (y - emitter_indices[1]) * dy,
+                    (z - emitter_indices[2]) * dz,
+                ]
+                for x, y, z in sensor_indices
+            ],
+            dtype=np.float32,
+        )
+
+        assert_eq(self.sensor_locations.shape, (self.sensor_count, 3))
+        assert_eq(self.sensor_locations.dtype, np.float32)
 
         self.total_shape = (self.Nx_total, self.Ny_total, self.Nz_total)
         self.slice_inner = (
@@ -115,9 +148,9 @@ class SimulationDescription:
             Nx,
             Ny,
             Nz,
-            impulse_location[0],
-            impulse_location[1],
-            impulse_location[2],
+            emitter_indices[0],
+            emitter_indices[1],
+            emitter_indices[2],
             radius=2,
         )
         self.p0 = smooth(p0_raw)
@@ -148,7 +181,7 @@ class SimulationDescription:
 
         self.has_obstacles = True
 
-    def make_simulation_index(self, x, y, z):
+    def make_simulation_index_flat(self, x, y, z):
         # TODO: measure the accuracy of this
         return (
             1
@@ -157,7 +190,7 @@ class SimulationDescription:
             + self.Nz_total * self.Ny_total * (x + self.Npml)
         )
 
-    def write(self, hdf5_input_file_path):
+    def _write_kwave_input_file(self, hdf5_input_file_path):
         assert isinstance(hdf5_input_file_path, str)
         assert (
             self.has_obstacles
@@ -178,7 +211,7 @@ class SimulationDescription:
 
             # list of indices into simulation matrix (flattened using MatLab indexing, after adding PML layers)
             write_array_for_kwave(
-                f, "sensor_mask_index", self.sensor_indices, dtype=np.uint64
+                f, "sensor_mask_index", self.sensor_indices_flat, dtype=np.uint64
             )
 
             write_scalar_for_kwave(f, "Nt", self.Nt, dtype=np.uint64)
@@ -231,3 +264,76 @@ class SimulationDescription:
             f.attrs["file_type"] = encode_str("input")
             f.attrs["major_version"] = encode_str("1")
             f.attrs["minor_version"] = encode_str("2")
+
+    def run(self):
+        kwave_executable = os.environ.get("KWAVE_EXECUTABLE")
+
+        if kwave_executable is None or not os.path.isfile(kwave_executable):
+            raise Exception(
+                "Please set the KWAVE_EXECUTABLE environment variable to point to a k-wave executable"
+            )
+
+        hdf5_input_file_path = "temp_kwave_simulation_input.h5"
+        hdf5_output_file_path = "temp_kwave_simulation_output.h5"
+
+        self._write_kwave_input_file(hdf5_input_file_path)
+
+        subprocess.run(
+            [kwave_executable, "-i", hdf5_input_file_path, "-o", hdf5_output_file_path],
+        )
+
+        with h5py.File(hdf5_output_file_path, "r") as interpolation_function:
+            pressure_vs_time = np.array(interpolation_function["p"])
+            assert pressure_vs_time.shape == (
+                1,
+                self.Nt,
+                self.sensor_count,
+            )
+
+        signals = pressure_vs_time[0].transpose(1, 0)
+        assert signals.shape == (self.sensor_count, self.Nt)
+
+        print(
+            f"Low-passing the simulated signal at {self.output_sampling_frequency} Hz before resampling"
+        )
+        sos = signal.butter(
+            N=10,
+            Wn=self.output_sampling_frequency,
+            fs=self.simulation_sampling_frequency,
+            btype="lowpass",
+            output="sos",
+        )
+
+        print(
+            f"Resampling the low-passed signal to {self.output_sampling_frequency} Hz"
+        )
+        signals_lowpassed = signal.sosfilt(sos=sos, x=signals, axis=1)
+
+        assert signals_lowpassed.shape == (
+            self.sensor_count,
+            self.Nt,
+        )
+
+        # This introduces high-frequency artefacts which I do not like one bit
+        # signals_resampled = signal.resample(
+        #     signals_lowpassed, num=description.output_length, axis=1
+        # )
+
+        x_old = np.linspace(0, 1.0, num=self.Nt, endpoint=True)
+        interpolation_function = interpolate.interp1d(
+            x=x_old, y=signals, kind="linear", axis=1
+        )
+        x_new = np.linspace(0.0, 1.0, num=self.output_length, endpoint=True)
+
+        signals_resampled = interpolation_function(x_new)
+
+        assert isinstance(signals_resampled, np.ndarray)
+        assert signals_resampled.shape == (
+            self.sensor_count,
+            self.output_length,
+        )
+
+        os.remove(hdf5_input_file_path)
+        os.remove(hdf5_output_file_path)
+
+        return signals_resampled.astype(np.float32)

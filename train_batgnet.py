@@ -13,7 +13,7 @@ import PIL.Image
 from the_device import the_device
 from custom_collate_fn import custom_collate
 from device_dict import DeviceDict
-from progress_bar import progress_bar
+from utils import progress_bar
 
 to_tensor = torchvision.transforms.ToTensor()
 

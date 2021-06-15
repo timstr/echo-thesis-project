@@ -30,7 +30,7 @@ from config_constants import (
 )
 from EchoLearnNN import EchoLearnNN
 from the_device import the_device
-from progress_bar import progress_bar
+from utils import progress_bar
 from visualization import plot_ground_truth, plot_prediction, plt_screenshot
 from realbool import realbool
 from convert_output import (

@@ -1,5 +1,5 @@
 import compress_pickle
-from progress_bar import progress_bar
+from utils import progress_bar
 from device_dict import DeviceDict
 import os
 import torch

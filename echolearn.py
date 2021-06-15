@@ -42,7 +42,7 @@ from the_device import the_device
 from device_dict import DeviceDict
 from dataset import WaveSimDataset
 from Echo4ChDataset import Echo4ChDataset
-from progress_bar import progress_bar
+from utils import progress_bar
 from custom_collate_fn import custom_collate
 
 from EchoLearnNN import EchoLearnNN

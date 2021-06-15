@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import scipy.io.wavfile as wf
 
 from wave_field import Field, make_random_field
-from progress_bar import progress_bar
+from utils import progress_bar
 
 
 def main():

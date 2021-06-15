@@ -3,7 +3,7 @@ from featurize import all_possible_obstacles
 import matplotlib.pyplot as plt
 
 from wave_field import Field
-from progress_bar import progress_bar
+from utils import progress_bar
 
 
 def main():

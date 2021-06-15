@@ -7,7 +7,7 @@ from the_device import the_device
 from dataset import WaveSimDataset
 from device_dict import DeviceDict
 from custom_collate_fn import custom_collate
-from progress_bar import progress_bar
+from utils import progress_bar
 from featurize import make_sdf_image_gt, make_sdf_image_pred
 import sys
 

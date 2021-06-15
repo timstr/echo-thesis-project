@@ -3,7 +3,7 @@ import numpy as np
 import scipy.io.wavfile as wf
 
 from wave_field import Field, make_random_field
-from progress_bar import progress_bar
+from utils import progress_bar
 from featurize import normalize_amplitude
 
 

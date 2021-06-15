@@ -29,7 +29,7 @@ from featurize import (
     sdf_batch,
 )
 from device_dict import DeviceDict
-from progress_bar import progress_bar
+from utils import progress_bar
 
 
 class WaveSimDataset(torch.utils.data.Dataset):
