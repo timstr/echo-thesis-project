@@ -1,18 +1,17 @@
-from dataset3d import WaveDataset3d
 import fix_dead_command_line
 
-import h5py
-
+from dataset3d import WaveDataset3d
 from current_simulation_description import (
     make_random_obstacles,
     make_simulation_description,
 )
+from utils import progress_bar
 
 
 def main():
     desc = make_simulation_description()
 
-    dataset = WaveDataset3d(desc, "dataset_v2.h5")
+    dataset = WaveDataset3d(desc, "dataset_v5.h5")
 
     N = len(dataset)
     M = 10000

@@ -15,13 +15,13 @@ minimum_x_units = 60
 def make_simulation_description():
     c_air = 343.0
     c_wood = 4000.0
-    c_human = 1540.0
-    c_dense_air = c_air * 2.0
+    # c_human = 1540.0
+    # c_dense_air = c_air * 2.0
 
     rho_air = 1.225
     rho_wood = 500.0
-    rho_human = 1010.0
-    rho_dense_air = rho_air * 2.0
+    # rho_human = 1010.0
+    # rho_dense_air = rho_air * 2.0
 
     sensor_center_x = 16
     sensor_center_y = Ny // 2
@@ -53,16 +53,16 @@ def make_simulation_description():
         density=rho_air,  # kilograms per cubic meter
     )
     obstacle_properties = AcousticMediumProperties(
-        speed_of_sound=c_dense_air,  # meters per second
-        density=rho_dense_air,  # kilograms per cubic meter
+        speed_of_sound=c_wood,  # meters per second
+        density=rho_wood,  # kilograms per cubic meter
         # speed_of_sound=c_wood,  # meters per second
         # density=rho_wood,  # kilograms per cubic meter
     )
 
     spatial_resolution = 1e-2  # meters
     Npml = 10  # spatial count
-    # dt = 1e-7  # seconds
-    dt = 1e-6  # seconds
+    dt = 1e-7  # seconds
+    # dt = 1e-6  # seconds
 
     sampling_frequency = 96_000.0
     sampling_period = 1.0 / sampling_frequency

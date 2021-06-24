@@ -53,6 +53,7 @@ class SimulationDescription:
         assert isinstance(Nt, int)
         assert isinstance(dt, float)
         assert isinstance(output_length, int)
+        assert output_length > 1 and output_length <= Nt
         assert isinstance(air_properties, AcousticMediumProperties)
         assert isinstance(obstacle_properties, AcousticMediumProperties)
         assert isinstance(sensor_indices, list)
@@ -293,47 +294,49 @@ class SimulationDescription:
         signals = pressure_vs_time[0].transpose(1, 0)
         assert signals.shape == (self.sensor_count, self.Nt)
 
-        print(
-            f"Low-passing the simulated signal at {self.output_sampling_frequency} Hz before resampling"
-        )
-        sos = signal.butter(
-            N=10,
-            Wn=self.output_sampling_frequency,
-            fs=self.simulation_sampling_frequency,
-            btype="lowpass",
-            output="sos",
-        )
+        if self.output_length < self.Nt:
+            print(
+                f"Low-passing the simulated signal at {self.output_sampling_frequency} Hz before resampling"
+            )
+            sos = signal.butter(
+                N=10,
+                Wn=self.output_sampling_frequency,
+                fs=self.simulation_sampling_frequency,
+                btype="lowpass",
+                output="sos",
+            )
 
-        print(
-            f"Resampling the low-passed signal to {self.output_sampling_frequency} Hz"
-        )
-        signals_lowpassed = signal.sosfilt(sos=sos, x=signals, axis=1)
+            print(
+                f"Resampling the low-passed signal to {self.output_sampling_frequency} Hz"
+            )
+            signals_lowpassed = signal.sosfilt(sos=sos, x=signals, axis=1)
 
-        assert signals_lowpassed.shape == (
-            self.sensor_count,
-            self.Nt,
-        )
+            assert signals_lowpassed.shape == (
+                self.sensor_count,
+                self.Nt,
+            )
 
-        # This introduces high-frequency artefacts which I do not like one bit
-        # signals_resampled = signal.resample(
-        #     signals_lowpassed, num=description.output_length, axis=1
-        # )
+            # This introduces high-frequency artefacts which I do not like one bit
+            # signals_resampled = signal.resample(
+            #     signals_lowpassed, num=description.output_length, axis=1
+            # )
 
-        x_old = np.linspace(0, 1.0, num=self.Nt, endpoint=True)
-        interpolation_function = interpolate.interp1d(
-            x=x_old, y=signals, kind="linear", axis=1
-        )
-        x_new = np.linspace(0.0, 1.0, num=self.output_length, endpoint=True)
+            x_old = np.linspace(0, 1.0, num=self.Nt, endpoint=True)
+            interpolation_function = interpolate.interp1d(
+                x=x_old, y=signals, kind="linear", axis=1
+            )
+            x_new = np.linspace(0.0, 1.0, num=self.output_length, endpoint=True)
 
-        signals_resampled = interpolation_function(x_new)
+            signals_resampled = interpolation_function(x_new)
 
-        assert isinstance(signals_resampled, np.ndarray)
-        assert signals_resampled.shape == (
-            self.sensor_count,
-            self.output_length,
-        )
+            assert isinstance(signals_resampled, np.ndarray)
+            assert signals_resampled.shape == (
+                self.sensor_count,
+                self.output_length,
+            )
+            signals = signals_resampled
 
         os.remove(hdf5_input_file_path)
         os.remove(hdf5_output_file_path)
 
-        return signals_resampled.astype(np.float32)
+        return signals.astype(np.float32)

@@ -1,6 +1,7 @@
-from assert_eq import assert_eq
 import h5py
 import numpy as np
+
+from assert_eq import assert_eq
 
 
 class H5DS:
@@ -20,16 +21,18 @@ class H5DS:
         assert not self.exists(h5file)
         if self.extensible:
             if value is None:
-                s = (0,) + self.shape
+                shape = (0,) + self.shape
             else:
                 if self.shape == (1,):
                     value = np.array([value], dtype=self.dtype)
                 value = value[np.newaxis, :]
-                s = (1,) + self.shape
-            ms = (None,) + self.shape
+                shape = (1,) + self.shape
+            maxshape = (None,) + self.shape
+            chunks = (1,) + self.shape
         else:
-            s = self.shape
-            ms = self.shape
+            shape = self.shape
+            maxshape = self.shape
+            chunks = self.shape
             if self.shape == (1,):
                 value = np.array([value], dtype=self.dtype)
             assert isinstance(value, np.ndarray)
@@ -37,11 +40,12 @@ class H5DS:
             assert_eq(value.shape, self.shape)
         ds = h5file.create_dataset(
             name=self.name,
-            shape=s,
-            maxshape=ms,
+            shape=shape,
+            maxshape=maxshape,
+            chunks=chunks,
             dtype=self.dtype,
-            compression="gzip",
-            compression_opts=9,
+            # compression="gzip",
+            # compression_opts=9,
         )
         ds[...] = value
 

@@ -1,6 +1,6 @@
+from tof_utils import obstacle_map_to_sdf
 from assert_eq import assert_eq
 import h5py
-import math
 import numpy as np
 import torch
 
@@ -58,6 +58,16 @@ class WaveDataset3d(torch.utils.data.Dataset):
             ),
             extensible=True,
         )
+        self.signed_distance_fields = H5DS(
+            name="signed_distance_fields",
+            dtype=np.float32,
+            shape=(
+                description.Nx,
+                description.Ny,
+                description.Nz,
+            ),
+            extensible=True,
+        )
 
         if len(self.h5file.keys()) == 0:
             self._create_empty_dataset()
@@ -91,6 +101,7 @@ class WaveDataset3d(torch.utils.data.Dataset):
 
         self.sensor_recordings.create(self.h5file)
         self.obstacles.create(self.h5file)
+        self.signed_distance_fields.create(self.h5file)
 
     def validate(self):
         assert self.h5file, "The file must be open"
@@ -125,12 +136,19 @@ class WaveDataset3d(torch.utils.data.Dataset):
 
         assert self.sensor_recordings.exists(self.h5file)
         assert self.obstacles.exists(self.h5file)
+        assert self.signed_distance_fields.exists(self.h5file)
 
         assert_eq(
             self.sensor_recordings.count(self.h5file), self.obstacles.count(self.h5file)
         )
 
     def simulate_and_append_to_dataset(self, obstacles):
+        assert self.h5file, "The file must be open"
+        self.description.set_obstacles(obstacles)
+        results = self.description.run()
+        self.append_to_dataset(obstacles, results)
+
+    def append_to_dataset(self, obstacles, recordings):
         assert self.h5file, "The file must be open"
         assert isinstance(obstacles, np.ndarray)
         assert_eq(obstacles.dtype, np.bool8)
@@ -142,32 +160,43 @@ class WaveDataset3d(torch.utils.data.Dataset):
                 self.description.Nz,
             ),
         )
-        self.description.set_obstacles(obstacles)
-        results = self.description.run()
-        assert isinstance(results, np.ndarray)
+        assert isinstance(recordings, np.ndarray)
+        assert_eq(recordings.dtype, np.float32)
         assert_eq(
-            results.shape,
-            (
-                self.description.sensor_count,
-                self.description.output_length,
-            ),
+            recordings.shape,
+            (self.description.sensor_count, self.description.output_length),
         )
-        self.sensor_recordings.append(self.h5file, results)
+
+        print("Computing signed distance field...")
+        sdf = (
+            obstacle_map_to_sdf(torch.tensor(obstacles).cuda(), self.description)
+            .cpu()
+            .numpy()
+        )
+        print("Computing signed distance field... done.")
+
+        self.sensor_recordings.append(self.h5file, recordings)
         self.obstacles.append(self.h5file, obstacles)
+        self.signed_distance_fields.append(self.h5file, sdf)
         self.validate()
 
     def __len__(self):
         assert self.h5file, "The file must be open"
-        return self.sensor_recordings.count(self.h5file)
+        ret = self.sensor_recordings.count(self.h5file)
+        return ret
 
     def __getitem__(self, idx):
         assert self.h5file, "The file must be open"
         sensor_recordings = self.sensor_recordings.read(self.h5file, idx)
         obstacles = self.obstacles.read(self.h5file, idx)
-
+        sdf = self.signed_distance_fields.read(self.h5file, idx)
         sensor_recordings = torch.tensor(sensor_recordings)
         obstacles = torch.tensor(obstacles)
+        sdf = torch.tensor(sdf)
+
+        # Hmmmm
+        sdf = torch.clamp(sdf, max=0.1)
 
         return DeviceDict(
-            {"sensor_recordings": sensor_recordings, "obstacles": obstacles}
+            {"sensor_recordings": sensor_recordings, "obstacles": obstacles, "sdf": sdf}
         )

@@ -1,8 +1,23 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import math
 
 from utils import assert_eq, is_power_of_2
+from reshape_layer import Reshape
+from tof_utils import time_of_flight_crop
+
+# signed, clipped logarithm
+def sclog(t):
+    max_val = 1e0
+    min_val = 1e-5
+    signs = torch.sign(t)
+    t = torch.abs(t)
+    t = torch.clamp(t, min=min_val, max=max_val)
+    t = torch.log(t)
+    t = (t - math.log(min_val)) / (math.log(max_val) - math.log(min_val))
+    t = t * signs
+    return t
 
 
 class TimeOfFlightNet(nn.Module):
@@ -35,9 +50,7 @@ class TimeOfFlightNet(nn.Module):
         assert_eq(emitter_location.shape, (3,))
         assert_eq(emitter_location.dtype, np.float32)
         self.emitter_location = nn.parameter.Parameter(
-            data=torch.tensor(emitter_location, dtype=torch.float32).reshape(
-                1, 1, 1, 3
-            ),
+            data=torch.tensor(emitter_location, dtype=torch.float32),
             requires_grad=False,
         )
 
@@ -51,131 +64,81 @@ class TimeOfFlightNet(nn.Module):
         )
         assert receiver_locations_tensor.shape == (num_receivers, 3)
         self.receiver_locations = nn.parameter.Parameter(
-            data=receiver_locations_tensor.reshape(1, 1, num_receivers, 3),
+            data=receiver_locations_tensor,
             requires_grad=False,
         )
 
-        hidden_features = 32
+        # Simple 2-layer fully-connected model
+        # hidden_features = 256
+        # self.model = nn.Sequential(
+        #     nn.BatchNorm1d(num_features=num_receivers),
+        #     Reshape(
+        #         (num_receivers, crop_length_samples),
+        #         (num_receivers * crop_length_samples,),
+        #     ),
+        #     nn.Linear(
+        #         in_features=num_receivers * crop_length_samples,
+        #         out_features=hidden_features,
+        #     ),
+        #     nn.ReLU(),
+        #     nn.Linear(in_features=hidden_features, out_features=1),
+        # )
+
+        # # HACK
+        assert crop_length_samples == 128
+
         self.model = nn.Sequential(
-            nn.Linear(
-                in_features=num_receivers * crop_length_samples,
-                out_features=hidden_features,
+            nn.BatchNorm1d(num_features=num_receivers),
+            nn.Conv1d(
+                in_channels=num_receivers,
+                out_channels=128,
+                kernel_size=15,
+                stride=2,
+                padding=7,
             ),
             nn.ReLU(),
-            nn.Linear(in_features=hidden_features, out_features=1),
+            nn.BatchNorm1d(num_features=128),
+            nn.Conv1d(
+                in_channels=128,
+                out_channels=128,
+                kernel_size=15,
+                stride=2,
+                padding=7,
+            ),
+            nn.ReLU(),
+            nn.BatchNorm1d(num_features=128),
+            nn.Conv1d(
+                in_channels=128,
+                out_channels=16,
+                kernel_size=15,
+                stride=2,
+                padding=7,
+            ),
+            nn.ReLU(),
+            Reshape((16, 16), (16 * 16,)),
+            nn.Linear(in_features=(16 * 16), out_features=1),
         )
 
     def forward(self, recordings, sample_locations):
-        assert isinstance(recordings, torch.Tensor)
-        assert isinstance(sample_locations, torch.Tensor)
-
-        # First batch dimension: number of separate recordings
-        B1 = recordings.shape[0]
-
-        # Second batch dimension: number of sampling locations per recording
-        B2 = sample_locations.shape[1]
-
-        assert_eq(
-            recordings.shape,
-            (
-                B1,
-                self.num_receivers,
-                self.recording_length_samples,
-            ),
-        )
-        recordings = recordings.unsqueeze(1).repeat(1, B2, 1, 1)
-        assert_eq(
-            recordings.shape,
-            (
-                B1,
-                B2,
-                self.num_receivers,
-                self.recording_length_samples,
-            ),
+        recordings_cropped = time_of_flight_crop(
+            recordings=recordings,
+            sample_locations=sample_locations,
+            emitter_location=self.emitter_location,
+            receiver_locations=self.receiver_locations,
+            speed_of_sound=self.speed_of_sound,
+            sampling_frequency=self.sampling_frequency,
+            crop_length_samples=self.crop_length_samples,
         )
 
-        assert_eq(sample_locations.shape, (B1, B2, 3))
+        recordings_cropped = sclog(recordings_cropped)
 
-        sample_locations = sample_locations.unsqueeze(2)
-        assert_eq(sample_locations.shape, (B1, B2, 1, 3))
+        B1, B2 = sample_locations.shape[:2]
 
-        distance_emitter_to_target = torch.norm(
-            sample_locations - self.emitter_location, dim=3
-        )
-        distance_target_to_receivers = torch.norm(
-            sample_locations - self.receiver_locations, dim=3
+        recordings_cropped_batches_combined = recordings_cropped.reshape(
+            (B1 * B2), self.num_receivers, self.crop_length_samples
         )
 
-        assert_eq(distance_emitter_to_target.shape, (B1, B2, 1))
-        assert_eq(distance_target_to_receivers.shape, (B1, B2, self.num_receivers))
-
-        total_distance = distance_emitter_to_target + distance_target_to_receivers
-        assert_eq(total_distance.shape, (B1, B2, self.num_receivers))
-
-        total_time = total_distance / self.speed_of_sound
-
-        total_samples = torch.round(total_time * self.sampling_frequency)
-
-        crop_start_samples = total_samples - self.crop_length_samples // 2
-        assert_eq(crop_start_samples.shape, (B1, B2, self.num_receivers))
-
-        crop_grid_base = -1.0 + 2.0 * (
-            crop_start_samples / self.recording_length_samples
-        )
-        assert_eq(crop_grid_base.shape, (B1, B2, self.num_receivers))
-        crop_grid_base = crop_grid_base.reshape(B1, B2, self.num_receivers, 1)
-
-        crop_grid_offset = torch.linspace(
-            start=0.0,
-            # NOTE: total extent of grid is 2 units, hence multiplication by 0.5
-            end=(0.5 * (self.crop_length_samples - 1) / self.recording_length_samples),
-            steps=self.crop_length_samples,
-            device=sample_locations.device,
-        )
-        assert_eq(crop_grid_offset.shape, (self.crop_length_samples,))
-        crop_grid_offset = crop_grid_offset.reshape(1, 1, 1, self.crop_length_samples)
-
-        crop_grid = crop_grid_base + crop_grid_offset
-        assert_eq(
-            crop_grid.shape, (B1, B2, self.num_receivers, self.crop_length_samples)
-        )
-
-        crop_grid = crop_grid.reshape(
-            (B1 * B2 * self.num_receivers), self.crop_length_samples, 1
-        )
-        crop_grid = torch.stack([crop_grid, torch.zeros_like(crop_grid)], dim=-1)
-
-        # for grid_sample: batch, height, width, 2
-        assert_eq(
-            crop_grid.shape,
-            ((B1 * B2 * self.num_receivers), self.crop_length_samples, 1, 2),
-        )
-
-        # For grid_sample: batch, features, height, width
-        recordings = recordings.reshape(
-            (B1 * B2 * self.num_receivers), 1, self.recording_length_samples, 1
-        )
-
-        recordings_cropped = nn.functional.grid_sample(
-            input=recordings, grid=crop_grid, mode="bilinear", align_corners=False
-        )
-
-        assert_eq(
-            recordings_cropped.shape,
-            ((B1 * B2 * self.num_receivers), 1, self.crop_length_samples, 1),
-        )
-
-        recordings_cropped = recordings_cropped.reshape(
-            B1, B2, self.num_receivers, self.crop_length_samples
-        )
-
-        # Yikes
-
-        predictions = self.model(
-            recordings_cropped.reshape(
-                (B1 * B2), (self.num_receivers * self.crop_length_samples)
-            )
-        )
+        predictions = self.model(recordings_cropped_batches_combined)
 
         assert_eq(predictions.shape, ((B1 * B2), 1))
         predictions = predictions.reshape(B1, B2)
