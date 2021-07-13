@@ -12,3 +12,5 @@ job_scripts/
 images/
 **/*.h5
 **/*.npz
+temp_img/
+*.gif

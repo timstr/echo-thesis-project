@@ -23,6 +23,7 @@ from tof_utils import (
     raymarch_sdf_ground_truth,
     raymarch_sdf_prediction,
     sample_obstacle_map,
+    vector_normalize,
 )
 from utils import progress_bar
 from current_simulation_description import make_simulation_description
@@ -70,7 +71,7 @@ def main():
 
     print(f"Using {len(sensor_indices)} receivers in total")
 
-    dataset = WaveDataset3d(description, "dataset_v5.h5")
+    dataset = WaveDataset3d(description, "dataset_v5_compressed.h5")
 
     val_ratio = 0.1
     val_size = int(len(dataset) * val_ratio)
@@ -114,6 +115,9 @@ def main():
     ).to(the_device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    restore_module(model, "models/model_5367.dat")
+    restore_module(optimizer, "models/optimizer_5367.dat")
 
     model_path = os.environ.get("TRAINING_MODEL_PATH")
 
@@ -295,17 +299,24 @@ def main():
                             description,
                         )
 
-                        rm_camera_center = [0.0, 0.0, 0.0]
-                        rm_camera_up = [0.0, 0.5 * description.Ny * description.dy, 0.0]
-                        rm_camera_right = [
-                            0.0,
-                            0.0,
-                            0.5 * description.Nz * description.dz,
-                        ]
-                        rm_x_resolution = 128
+                        # rm_camera_center = [0.0, 0.0, 0.0]
+                        # rm_camera_up = [0.0, 0.5 * description.Ny * description.dy, 0.0]
+                        # rm_camera_right = [
+                        #     0.0,
+                        #     0.0,
+                        #     0.5 * description.Nz * description.dz,
+                        # ]
+                        # rm_x_resolution = 128
+                        # rm_y_resolution = 128
+
+                        rm_camera_center = [-0.2, -0.4, 1.0]
+                        rm_camera_up = vector_normalize([-0.2, 1.0, 0.2], norm=0.5)
+                        rm_camera_right = vector_normalize([1.0, 0.0, 1.0], norm=1.0)
+                        rm_x_resolution = 256
                         rm_y_resolution = 128
 
                         ax_t3.title.set_text("Ground Truth Raymarch (train)")
+                        print("Raymarching ground truth (train)")
                         ax_t3.imshow(
                             raymarch_sdf_ground_truth(
                                 camera_center_xyz=rm_camera_center,
@@ -321,6 +332,7 @@ def main():
                         )
 
                         ax_b3.title.set_text("Ground Truth Raymarch (validation)")
+                        print("Raymarching ground truth (validation)")
                         ax_b3.imshow(
                             raymarch_sdf_ground_truth(
                                 camera_center_xyz=rm_camera_center,
@@ -336,6 +348,7 @@ def main():
                         )
 
                         ax_t4.title.set_text("Predicted Raymarch (train)")
+                        print("Raymarching prediction (train)")
                         ax_t4.imshow(
                             raymarch_sdf_prediction(
                                 camera_center_xyz=rm_camera_center,
@@ -354,6 +367,7 @@ def main():
                         )
 
                         ax_b4.title.set_text("Predicted Raymarch (validation)")
+                        print("Raymarching prediction (validation)")
                         ax_b4.imshow(
                             raymarch_sdf_prediction(
                                 camera_center_xyz=rm_camera_center,

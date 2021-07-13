@@ -13,7 +13,7 @@ def make_script(format, implicit, variance, summary_statistics):
     contents = f"""\
     #!/bin/bash
 
-    #PBS -l walltime=24:00:00,select=1:ncpus=4:ngpus=1:mem=16gb
+    #PBS -l walltime=36:00:00,select=1:ncpus=4:ngpus=1:mem=16gb
     #PBS -N {desc}
     #PBS -A st-rhodin-1-gpu
     #PBS -m abe

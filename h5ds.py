@@ -1,5 +1,6 @@
 import h5py
 import numpy as np
+import torch
 
 from assert_eq import assert_eq
 
@@ -33,7 +34,9 @@ class H5DS:
             shape = self.shape
             maxshape = self.shape
             chunks = self.shape
-            if self.shape == (1,):
+            if isinstance(value, torch.Tensor):
+                value = value.detach().cpu().numpy()
+            elif self.shape == (1,):
                 value = np.array([value], dtype=self.dtype)
             assert isinstance(value, np.ndarray)
             assert_eq(value.dtype, self.dtype)
@@ -44,8 +47,8 @@ class H5DS:
             maxshape=maxshape,
             chunks=chunks,
             dtype=self.dtype,
-            # compression="gzip",
-            # compression_opts=9,
+            compression="gzip",
+            compression_opts=9,
         )
         ds[...] = value
 
@@ -72,6 +75,8 @@ class H5DS:
         if self.shape == (1,):
             assert isinstance(value, int) or isinstance(value, float)
             value = np.array([value], dtype=self.dtype)
+        if isinstance(value, torch.Tensor):
+            value = value.detach().cpu().numpy()
         assert isinstance(value, np.ndarray)
         assert_eq(value.dtype, self.dtype)
         assert_eq(value.shape, self.shape)
@@ -91,6 +96,8 @@ class H5DS:
         if self.shape == (1,):
             assert isinstance(value, int) or isinstance(value, float)
             value = np.array([value], dtype=self.dtype)
+        if isinstance(value, torch.Tensor):
+            value = value.detach().cpu().numpy()
         assert isinstance(value, np.ndarray)
         assert_eq(value.dtype, self.dtype)
         assert_eq(value.shape, self.shape)

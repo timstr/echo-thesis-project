@@ -600,7 +600,123 @@ def is_three_floats(x):
     return len(x) == 3 and all([isinstance(xi, float) for xi in x])
 
 
-def __raymarch_sdf_impl(
+def vector_cross(a, b):
+    assert is_three_floats(a)
+    assert is_three_floats(b)
+    return [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+
+
+def vector_length(x):
+    assert is_three_floats(x)
+    return math.sqrt(x[0] ** 2 + x[1] ** 2 + x[2] ** 2)
+
+
+def vector_normalize(v, norm=1.0):
+    assert is_three_floats(v)
+    k = norm / vector_length(v)
+    return [k * v[0], k * v[1], k * v[2]]
+
+
+def _simulation_boundary_sdf(description, sample_locations, radius):
+    assert isinstance(description, SimulationDescription)
+    assert isinstance(sample_locations, torch.Tensor)
+    D, N, M = sample_locations.shape
+    assert D == 3
+    assert isinstance(radius, float)
+
+    locations_x = sample_locations[0]
+    locations_y = sample_locations[1]
+    locations_z = sample_locations[2]
+
+    # --- x axes ---
+
+    # compress x axis
+    x_axes_locations_x_positive = torch.clamp(locations_x - description.xmax, min=0.0)
+    x_axes_locations_x_negative = torch.clamp(locations_x - description.xmin, max=0.0)
+    x_axes_locations_x = x_axes_locations_x_positive + x_axes_locations_x_negative
+
+    # mirror and shift y axis
+    x_axes_locations_y = torch.minimum(
+        torch.abs(locations_y - description.ymin),
+        torch.abs(locations_y - description.ymax),
+    )
+
+    # mirror and shift z axis
+    x_axes_locations_z = torch.minimum(
+        torch.abs(locations_z - description.zmin),
+        torch.abs(locations_z - description.zmax),
+    )
+
+    # distance to point
+    x_axes_locations = torch.stack(
+        [x_axes_locations_x, x_axes_locations_y, x_axes_locations_z], dim=0
+    )
+    sdf_x_axes = torch.norm(x_axes_locations, dim=0) - radius
+
+    # --- y axes ---
+
+    # mirror and shift x axis
+    y_axes_locations_x = torch.minimum(
+        torch.abs(locations_x - description.xmin),
+        torch.abs(locations_x - description.xmax),
+    )
+
+    # compress y axis
+    y_axes_locations_y_positive = torch.clamp(locations_y - description.ymax, min=0.0)
+    y_axes_locations_y_negative = torch.clamp(locations_y - description.ymin, max=0.0)
+    y_axes_locations_y = y_axes_locations_y_positive + y_axes_locations_y_negative
+
+    # mirror and shift z axis
+    y_axes_locations_z = torch.minimum(
+        torch.abs(locations_z - description.zmin),
+        torch.abs(locations_z - description.zmax),
+    )
+
+    # distance to point
+    y_axes_locations = torch.stack(
+        [y_axes_locations_x, y_axes_locations_y, y_axes_locations_z], dim=0
+    )
+    sdf_y_axes = torch.norm(y_axes_locations, dim=0) - radius
+
+    # --- x axes ---
+
+    # mirror and shift z axis
+    z_axes_locations_x = torch.minimum(
+        torch.abs(locations_x - description.xmin),
+        torch.abs(locations_x - description.xmax),
+    )
+
+    # mirror and shift y axis
+    z_axes_locations_y = torch.minimum(
+        torch.abs(locations_y - description.ymin),
+        torch.abs(locations_y - description.ymax),
+    )
+
+    # compress x axis
+    z_axes_locations_z_positive = torch.clamp(locations_z - description.zmax, min=0.0)
+    z_axes_locations_z_negative = torch.clamp(locations_z - description.zmin, max=0.0)
+    z_axes_locations_z = z_axes_locations_z_positive + z_axes_locations_z_negative
+
+    # distance to point
+    z_axes_locations = torch.stack(
+        [z_axes_locations_x, z_axes_locations_y, z_axes_locations_z], dim=0
+    )
+    sdf_z_axes = torch.norm(z_axes_locations, dim=0) - radius
+
+    return torch.minimum(
+        torch.minimum(
+            sdf_x_axes,
+            sdf_y_axes,
+        ),
+        sdf_z_axes,
+    )
+
+
+def _raymarch_sdf_impl(
     camera_center_xyz,
     camera_up_xyz,
     camera_right_xyz,
@@ -633,23 +749,19 @@ def __raymarch_sdf_impl(
             assert recordings.shape[1] == description.output_length
             prediction = True
         # create grid of sampling points using meshgrid between two camera directions
-        def make_tensor_3f(t):
-            return torch.tensor([*t], dtype=torch.float32, device="cuda").reshape(
+        def make_tensor_3f(t, normalize=False):
+            ret = torch.tensor([*t], dtype=torch.float32, device="cuda").reshape(
                 3, 1, 1
             )
+            if normalize:
+                return ret / torch.norm(ret, dim=0, keepdim=True)
+            return ret
 
         camera_center = make_tensor_3f(camera_center_xyz)
         camera_up = make_tensor_3f(camera_up_xyz)
         camera_right = make_tensor_3f(camera_right_xyz)
         camera_forward = make_tensor_3f(
-            [
-                camera_up_xyz[1] * camera_right_xyz[2]
-                - camera_up_xyz[2] * camera_right_xyz[1],
-                camera_up_xyz[2] * camera_right_xyz[0]
-                - camera_up_xyz[0] * camera_right_xyz[2],
-                camera_up_xyz[0] * camera_right_xyz[1]
-                - camera_up_xyz[1] * camera_right_xyz[0],
-            ]
+            vector_cross(camera_up_xyz, camera_right_xyz), normalize=True
         )
 
         # create grid of view vectors using cross of two camera directions (and maybe offset from center for slight perspective)
@@ -661,48 +773,75 @@ def __raymarch_sdf_impl(
         locations = camera_center + offsets_x + offsets_y
 
         directions = camera_forward.repeat(1, x_resolution, y_resolution)
-        # directions = directions + 0.05 * (offsets_x + offsets_y)
+
+        # Add perspective distortion
+        # directions = directions + 0.1 * (offsets_x + offsets_y)
         # directions /= torch.norm(directions, dim=0, keepdim=True)
 
-        def sample_sdf(l):
-            D, W, H = l.shape
-            assert_eq(D, 3)
-            l = l.reshape(1, 3, W * H).permute(0, 2, 1)
+        def _sample_obstacle_sdf(l):
+            assert_eq(l.shape, (3, x_resolution, y_resolution))
+            l_flat = l.reshape(1, 3, x_resolution * y_resolution).permute(0, 2, 1)
+            assert l_flat.shape == (1, x_resolution * y_resolution, 3)
             if prediction:
-                num_splits = 16
-                split_size = (W * H) // num_splits
+                num_splits = 256  # 128
+                split_size = (x_resolution * y_resolution) // num_splits
                 values_acc = []
                 for i in range(num_splits):
                     idx_lo = i * split_size
                     idx_hi = (i + 1) * split_size
                     values_acc.append(
-                        model(recordings.unsqueeze(0), l[:, idx_lo:idx_hi])
+                        model(recordings.unsqueeze(0), l_flat[:, idx_lo:idx_hi])
                     )
                 sdf_values = torch.cat(values_acc, dim=1)
             else:
                 sdf_values = sample_obstacle_map(
                     obstacle_map_batch=obstacle_sdf.unsqueeze(0),
-                    locations_xyz_batch=l,
+                    locations_xyz_batch=l_flat,
                     description=description,
                 )
-            assert_eq(sdf_values.shape, (1, W * H))
-            return sdf_values.reshape(W, H)
+            assert_eq(sdf_values.shape, (1, x_resolution * y_resolution))
+            x_in_bounds = (l[0] >= description.xmin).logical_and(
+                l[0] <= description.xmax
+            )
+            y_in_bounds = (l[1] >= description.ymin).logical_and(
+                l[1] <= description.ymax
+            )
+            z_in_bounds = (l[2] >= description.zmin).logical_and(
+                l[2] <= description.zmax
+            )
+            in_bounds = x_in_bounds.logical_and(y_in_bounds).logical_and(z_in_bounds)
+            out_of_bounds = in_bounds.logical_not()
+            sdf_values = sdf_values.reshape(x_resolution, y_resolution)
+            sdf_values[out_of_bounds] = 0.1
+            return sdf_values
 
         # keep a boolean mask of rays that have not yet collided
         active = torch.ones(
             (x_resolution, y_resolution), dtype=torch.bool, device="cuda"
         )
 
-        num_iterations = 500
+        hit_axes = torch.zeros(
+            (x_resolution, y_resolution), dtype=torch.bool, device="cuda"
+        )
+
+        num_iterations = 64
         for i in range(num_iterations):
             # get SDF values at each ray location
-            sdf = sample_sdf(locations)
+            sampled_sdf_obstacles = _sample_obstacle_sdf(locations)
+
+            sampled_sdf_axes = _simulation_boundary_sdf(
+                description, locations, radius=0.001
+            )
+
+            sampled_sdf = torch.minimum(sampled_sdf_obstacles, sampled_sdf_axes)
 
             # if SDF value is below threshold, make inactive
-            active[sdf <= 0.01] = 0
+            threshold = 0.001
+            active[sampled_sdf <= threshold] = 0
+            hit_axes[sampled_sdf_axes <= threshold] = 1
 
             # advance all active rays by their direction vector times their SDF value
-            locations[:, active] += (sdf * directions)[:, active]
+            locations[:, active] += (sampled_sdf * directions)[:, active]
 
             progress_bar(i, num_iterations)
 
@@ -716,21 +855,27 @@ def __raymarch_sdf_impl(
         inactive = active.logical_not()
 
         # shade collide pixels with x,y,z partial derivatives of SDF at sampling locations
-        h = 0.0001
+        h = 0.02
         dx = make_tensor_3f([0.5 * h, 0.0, 0.0])
         dy = make_tensor_3f([0.0, 0.5 * h, 0.0])
         dz = make_tensor_3f([0.0, 0.0, 0.5 * h])
 
-        dsdfdx = (1.0 / h) * (sample_sdf(locations + dx) - sample_sdf(locations - dx))
-        dsdfdy = (1.0 / h) * (sample_sdf(locations + dy) - sample_sdf(locations - dy))
-        dsdfdz = (1.0 / h) * (sample_sdf(locations + dz) - sample_sdf(locations - dz))
+        dsdfdx = (1.0 / h) * (
+            _sample_obstacle_sdf(locations + dx) - _sample_obstacle_sdf(locations - dx)
+        )
+        dsdfdy = (1.0 / h) * (
+            _sample_obstacle_sdf(locations + dy) - _sample_obstacle_sdf(locations - dy)
+        )
+        dsdfdz = (1.0 / h) * (
+            _sample_obstacle_sdf(locations + dz) - _sample_obstacle_sdf(locations - dz)
+        )
         assert_eq(dsdfdx.shape, (x_resolution, y_resolution))
         assert_eq(dsdfdy.shape, (x_resolution, y_resolution))
         assert_eq(dsdfdz.shape, (x_resolution, y_resolution))
         sdf_normal = torch.stack([dsdfdx, dsdfdy, dsdfdz], dim=0)
         sdf_normal /= torch.clamp(torch.norm(sdf_normal, dim=0, keepdim=True), min=1e-3)
         assert_eq(sdf_normal.shape, (3, x_resolution, y_resolution))
-        light_dir = make_tensor_3f([0.0, -1.0, 0.0])
+        light_dir = make_tensor_3f([-0.25, -1.0, 0.5], normalize=True)
         normal_dot_light = torch.sum(sdf_normal * light_dir, dim=0)
         assert_eq(normal_dot_light.shape, (x_resolution, y_resolution))
         shading = 0.2 + 0.6 * torch.clamp(normal_dot_light, min=0.0)
@@ -738,6 +883,11 @@ def __raymarch_sdf_impl(
         ret[0][inactive] = shading[inactive]
         ret[1][inactive] = shading[inactive]
         ret[2][inactive] = shading[inactive]
+
+        # colour axes
+        ret[0][hit_axes] = 0.0
+        ret[1][hit_axes] = 0.0
+        ret[2][hit_axes] = 0.0
 
         return ret
 
@@ -751,7 +901,7 @@ def raymarch_sdf_ground_truth(
     description,
     obstacle_sdf,
 ):
-    return __raymarch_sdf_impl(
+    return _raymarch_sdf_impl(
         camera_center_xyz=camera_center_xyz,
         camera_up_xyz=camera_up_xyz,
         camera_right_xyz=camera_right_xyz,
@@ -774,7 +924,7 @@ def raymarch_sdf_prediction(
     model,
     recordings,
 ):
-    return __raymarch_sdf_impl(
+    return _raymarch_sdf_impl(
         camera_center_xyz=camera_center_xyz,
         camera_up_xyz=camera_up_xyz,
         camera_right_xyz=camera_right_xyz,

@@ -274,14 +274,53 @@ class SimulationDescription:
                 "Please set the KWAVE_EXECUTABLE environment variable to point to a k-wave executable"
             )
 
-        hdf5_input_file_path = "temp_kwave_simulation_input.h5"
-        hdf5_output_file_path = "temp_kwave_simulation_output.h5"
+        kwave_temp_folder = os.environ.get("KWAVE_TEMP_FOLDER")
+        if kwave_temp_folder is None:
+            raise Exception(
+                "Please set the KWAVE_TEMP_FOLDER environment variable to point to a writable directory"
+            )
+
+        if not os.path.isdir(kwave_temp_folder):
+            os.makedirs(kwave_temp_folder)
+
+        hdf5_input_file_path = os.path.join(
+            kwave_temp_folder, "temp_kwave_simulation_input.h5"
+        )
+        hdf5_output_file_path = os.path.join(
+            kwave_temp_folder, "temp_kwave_simulation_output.h5"
+        )
+
+        if os.path.exists(hdf5_input_file_path):
+            os.remove(hdf5_input_file_path)
+        if os.path.exists(hdf5_output_file_path):
+            os.remove(hdf5_output_file_path)
+
+        assert not os.path.exists(hdf5_input_file_path)
+        assert not os.path.exists(hdf5_output_file_path)
 
         self._write_kwave_input_file(hdf5_input_file_path)
 
-        subprocess.run(
-            [kwave_executable, "-i", hdf5_input_file_path, "-o", hdf5_output_file_path],
-        )
+        try:
+            res = subprocess.run(
+                [kwave_executable, "-i", hdf5_input_file_path, "-o", hdf5_output_file_path],
+                capture_output=True
+            )
+            if res.returncode != 0:
+                print("Something went wrong while trying to run kwave:")
+                print("STDERR:")
+                print(res.stderr.decode("utf-8"))
+                print("STDOUT:")
+                print(res.stdout.decode("utf-8"))
+                exit(-1)
+        except subprocess.CalledProcessError as e:
+            print("Something went wrong while trying to run kwave:")
+            print("STDERR:")
+            print(e.stderr.decode("utf-8"))
+            print("STDOUT:")
+            print(e.stdout.decode("utf-8"))
+            exit(-1)
+
+        assert os.path.isfile(hdf5_output_file_path)
 
         with h5py.File(hdf5_output_file_path, "r") as interpolation_function:
             pressure_vs_time = np.array(interpolation_function["p"])
@@ -295,9 +334,9 @@ class SimulationDescription:
         assert signals.shape == (self.sensor_count, self.Nt)
 
         if self.output_length < self.Nt:
-            print(
-                f"Low-passing the simulated signal at {self.output_sampling_frequency} Hz before resampling"
-            )
+            # print(
+            #     f"Low-passing the simulated signal at {self.output_sampling_frequency} Hz before resampling"
+            # )
             sos = signal.butter(
                 N=10,
                 Wn=self.output_sampling_frequency,
@@ -306,9 +345,9 @@ class SimulationDescription:
                 output="sos",
             )
 
-            print(
-                f"Resampling the low-passed signal to {self.output_sampling_frequency} Hz"
-            )
+            # print(
+            #     f"Resampling the low-passed signal to {self.output_sampling_frequency} Hz"
+            # )
             signals_lowpassed = signal.sosfilt(sos=sos, x=signals, axis=1)
 
             assert signals_lowpassed.shape == (

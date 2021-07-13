@@ -148,10 +148,10 @@ class WaveDataset3d(torch.utils.data.Dataset):
         results = self.description.run()
         self.append_to_dataset(obstacles, results)
 
-    def append_to_dataset(self, obstacles, recordings):
+    def append_to_dataset(self, obstacles, recordings, sdf=None):
         assert self.h5file, "The file must be open"
-        assert isinstance(obstacles, np.ndarray)
-        assert_eq(obstacles.dtype, np.bool8)
+        assert isinstance(obstacles, np.ndarray) or isinstance(obstacles, torch.Tensor)
+        assert obstacles.dtype in [np.bool8, torch.bool]
         assert_eq(
             obstacles.shape,
             (
@@ -160,20 +160,31 @@ class WaveDataset3d(torch.utils.data.Dataset):
                 self.description.Nz,
             ),
         )
-        assert isinstance(recordings, np.ndarray)
-        assert_eq(recordings.dtype, np.float32)
+        assert isinstance(recordings, np.ndarray) or isinstance(
+            recordings, torch.Tensor
+        )
+        assert recordings.dtype in [np.float32, torch.float32]
         assert_eq(
             recordings.shape,
             (self.description.sensor_count, self.description.output_length),
         )
 
-        print("Computing signed distance field...")
-        sdf = (
-            obstacle_map_to_sdf(torch.tensor(obstacles).cuda(), self.description)
-            .cpu()
-            .numpy()
+        if sdf is None:
+            # print("Computing signed distance field...")
+            sdf = (
+                obstacle_map_to_sdf(torch.tensor(obstacles).cuda(), self.description)
+                .cpu()
+                .numpy()
+            )
+            # print("Computing signed distance field... done.")
+
+        assert isinstance(sdf, np.ndarray) or isinstance(sdf, torch.Tensor)
+        assert sdf.dtype in [np.float32, torch.float32]
+        assert sdf.shape == (
+            self.description.Nx,
+            self.description.Ny,
+            self.description.Nz,
         )
-        print("Computing signed distance field... done.")
 
         self.sensor_recordings.append(self.h5file, recordings)
         self.obstacles.append(self.h5file, obstacles)
