@@ -183,7 +183,6 @@ class SimulationDescription:
         self.has_obstacles = True
 
     def make_simulation_index_flat(self, x, y, z):
-        # TODO: measure the accuracy of this
         return (
             1
             + (z + self.Npml)
@@ -302,8 +301,14 @@ class SimulationDescription:
 
         try:
             res = subprocess.run(
-                [kwave_executable, "-i", hdf5_input_file_path, "-o", hdf5_output_file_path],
-                capture_output=True
+                [
+                    kwave_executable,
+                    "-i",
+                    hdf5_input_file_path,
+                    "-o",
+                    hdf5_output_file_path,
+                ],
+                capture_output=True,
             )
             if res.returncode != 0:
                 print("Something went wrong while trying to run kwave:")

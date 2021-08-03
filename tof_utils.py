@@ -1,4 +1,5 @@
 import torch
+import torch.cuda
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
@@ -7,7 +8,65 @@ import math
 
 from simulation_description import SimulationDescription
 from utils import assert_eq, progress_bar
+from current_simulation_description import minimum_x_units
 from the_device import the_device
+
+
+class SplitSize:
+    def __init__(self, name):
+        assert isinstance(name, str)
+        self._num_splits = 1
+        self._name = name
+
+    def get(self):
+        return self._num_splits
+
+    def name(self):
+        return self._name
+
+    def double(self):
+        self._num_splits *= 2
+
+
+def split_till_it_fits(fn, split_size, *args, **kwargs):
+    assert isinstance(split_size, SplitSize)
+    split_size_was_increased = False
+    max_size = 1024 * 1024
+    while split_size.get() <= max_size:
+        try:
+            ret = fn(*args, **kwargs, num_splits=split_size.get())
+            if split_size_was_increased:
+                print(
+                    f'The split size for "{split_size.name()}" was increased to {split_size.get()}'
+                )
+            return ret
+        except RuntimeError as e:
+            se = str(e)
+            oom = ("out of memory" in se) or ("not enough memory" in se)
+            if not oom:
+                raise e
+            torch.cuda.empty_cache()
+            split_size.double()
+            split_size_was_increased = True
+    raise Exception(
+        f'The split size for "{split_size.name()}" was increased too much and there\'s probably a bug'
+    )
+
+
+def make_receiver_indices(num_x, num_y, num_z):
+    options = {1: [2], 2: [0, 3], 4: [0, 1, 2, 3]}
+    assert num_x in options.keys()
+    assert num_y in options.keys()
+    assert num_z in options.keys()
+    indices_x = options[num_x]
+    indices_y = options[num_y]
+    indices_z = options[num_z]
+    flat_indices = []
+    for ix in indices_x:
+        for iy in indices_y:
+            for iz in indices_z:
+                flat_indices.append(ix * 16 + iy * 4 + iz)
+    return flat_indices
 
 
 def subset_recordings(recordings_batch, sensor_indices, description):
@@ -67,12 +126,134 @@ def make_random_training_locations(
             locations[mask] = new_locations()[mask]
         return locations
 
-    # HACK: excluding half because the emitter overpowers everything otherwise
-    # locations_min[0] = 0.5 * (locations_max[0] - locations_min[0])
-    # r = torch.rand(
-    #     (batch_size, samples_per_example, 3), dtype=torch.float32, device=device
-    # )
-    # return (r * (locations_max - locations_min)) + locations_min
+
+def all_grid_locations(device, description):
+    assert isinstance(description, SimulationDescription)
+    xmin_location = (minimum_x_units - description.emitter_indices[0]) * description.dx
+    x_steps = description.Nx - minimum_x_units
+    x_ls = torch.linspace(
+        start=xmin_location,
+        end=description.xmax,
+        steps=x_steps,
+        device=device,
+    )
+    y_ls = torch.linspace(
+        start=description.ymin,
+        end=description.ymax,
+        steps=description.Ny,
+        device=device,
+    )
+    z_ls = torch.linspace(
+        start=description.zmin,
+        end=description.zmax,
+        steps=description.Nz,
+        device=device,
+    )
+    gx, gy, gz = torch.meshgrid([x_ls, y_ls, z_ls])
+    gx = gx.flatten()
+    gy = gy.flatten()
+    gz = gz.flatten()
+    assert_eq(gx.shape, (x_steps * description.Ny * description.Nz,))
+    assert_eq(gy.shape, (x_steps * description.Ny * description.Nz,))
+    assert_eq(gz.shape, (x_steps * description.Ny * description.Nz,))
+    all_locations = torch.stack([gx, gy, gz], dim=1)
+    assert_eq(all_locations.shape, (x_steps * description.Ny * description.Nz, 3))
+    return all_locations
+
+
+def evaluate_prediction(sdf_pred, sdf_gt, description):
+    assert isinstance(sdf_pred, torch.Tensor)
+    assert isinstance(sdf_gt, torch.Tensor)
+    assert isinstance(description, SimulationDescription)
+    assert_eq(
+        sdf_pred.shape,
+        ((description.Nx - minimum_x_units), description.Ny, description.Nz),
+    )
+    assert_eq(
+        sdf_gt.shape,
+        ((description.Nx - minimum_x_units), description.Ny, description.Nz),
+    )
+
+    mse_sdf = torch.mean((sdf_pred - sdf_gt) ** 2).item()
+
+    occupancy_pred = (sdf_pred <= 0.0).bool()
+    occupancy_gt = (sdf_gt <= 0.0).bool()
+
+    gt_true = occupancy_gt
+    gt_false = torch.logical_not(occupancy_gt)
+    pred_true = occupancy_pred
+    pred_false = torch.logical_not(occupancy_pred)
+
+    def as_fraction(t):
+        assert isinstance(t, torch.BoolTensor) or isinstance(t, torch.cuda.BoolTensor)
+        f = torch.mean(t.float()).item()
+        assert f >= 0.0 and f <= 1.0
+        return f
+
+    intersection = torch.logical_and(gt_true, pred_true)
+    union = torch.logical_or(gt_true, pred_true)
+
+    f_intersection = as_fraction(intersection)
+    f_union = as_fraction(union)
+
+    assert f_intersection >= 0.0
+    assert f_intersection <= 1.0
+    assert f_union >= 0.0
+    assert f_union <= 1.0
+    assert f_intersection <= f_union
+
+    epsilon = 1e-6
+
+    intersection_over_union = (f_intersection / f_union) if (f_union > epsilon) else 1.0
+
+    assert intersection_over_union <= 1.0
+
+    true_positives = torch.logical_and(gt_true, pred_true)
+    true_negatives = torch.logical_and(gt_false, pred_false)
+    false_positives = torch.logical_and(gt_false, pred_true)
+    false_negatives = torch.logical_and(gt_true, pred_false)
+
+    f_true_positives = as_fraction(true_positives)
+    f_true_negatives = as_fraction(true_negatives)
+    f_false_positives = as_fraction(false_positives)
+    f_false_negatives = as_fraction(false_negatives)
+
+    assert (
+        abs(
+            f_true_positives
+            + f_true_negatives
+            + f_false_positives
+            + f_false_negatives
+            - 1.0
+        )
+        < epsilon
+    )
+
+    selected = f_true_positives + f_false_positives
+    relevant = f_true_positives + f_false_negatives
+
+    precision = f_true_positives / selected if (selected > epsilon) else 0.0
+    recall = f_true_positives / relevant if (relevant > epsilon) else 0.0
+
+    f1score = (
+        (2.0 * precision * recall / (precision + recall))
+        if (abs(precision + recall) > epsilon)
+        else 0.0
+    )
+
+    return {
+        "mean_squared_error_sdf": mse_sdf,
+        "intersection": f_intersection,
+        "union": f_union,
+        "intersection_over_union": intersection_over_union,
+        "true_positives": f_true_positives,
+        "true_negatives": f_true_negatives,
+        "false_positives": f_false_positives,
+        "false_negatives": f_false_negatives,
+        "precision": precision,
+        "recall": recall,
+        "f1score": f1score,
+    }
 
 
 def sample_obstacle_map(obstacle_map_batch, locations_xyz_batch, description):
@@ -134,21 +315,29 @@ def sample_obstacle_map(obstacle_map_batch, locations_xyz_batch, description):
     return values.reshape(B, N)
 
 
-def plot_ground_truth(plt_axis, obstacle_map, description, locations=None):
+def _plot_sdf_slices(
+    plt_axis, model, recordings, obstacle_map, description, num_splits, locations=None
+):
     with torch.no_grad():
+        assert model is None or isinstance(model, nn.Module)
+        assert recordings is None or isinstance(recordings, torch.Tensor)
+        assert obstacle_map is None or isinstance(obstacle_map, torch.Tensor)
+        assert (model is None) != (obstacle_map is None)
+        assert (model is None) == (recordings is None)
         assert isinstance(description, SimulationDescription)
+        assert isinstance(num_splits, int)
 
         x_ls = torch.linspace(
             start=description.xmin,
             end=description.xmax,
             steps=description.Nx,
-            # device=the_device,
+            device=the_device,
         )
         y_ls = torch.linspace(
             start=description.ymin,
             end=description.ymax,
             steps=description.Ny,
-            # device=the_device,
+            device=the_device,
         )
 
         x_grid, y_grid = torch.meshgrid([x_ls, y_ls])
@@ -161,26 +350,22 @@ def plot_ground_truth(plt_axis, obstacle_map, description, locations=None):
             z = description.zmin + t * (description.zmax - description.zmin)
 
             z_grid = z * torch.ones_like(x_grid)
-            xyz = torch.stack([x_grid, y_grid, z_grid], dim=2)  # .to(the_device)
+            xyz = torch.stack([x_grid, y_grid, z_grid], dim=2).to(the_device)
             assert_eq(xyz.shape, (description.Nx, description.Ny, 3))
-            xyz = xyz.reshape(1, (description.Nx * description.Ny), 3)
+            xyz = xyz.reshape((description.Nx * description.Ny), 3)
 
-            # num_splits = 8
-            # assert (description.Nx * description.Ny) % num_splits == 0
-            # split_size = (description.Nx * description.Ny) // num_splits
-            # splits = []
-            # for i in range(num_splits):
-            #     split_lo = i * split_size
-            #     split_hi = (i + 1) * split_size
-            #     xyz_split = xyz[:, split_lo:split_hi]
-            #     prediction_split = sample_obstacle_map(
-            #         obstacle_map.unsqueeze(0), xyz_split, description
-            #     )
-            #     splits.append(prediction_split)
-            # prediction = torch.cat(splits, dim=1)
-            prediction = sample_obstacle_map(
-                obstacle_map.unsqueeze(0), xyz, description
-            ).squeeze(0)
+            if model is not None:
+                prediction = split_network_prediction(
+                    model=model,
+                    locations=xyz,
+                    recordings=recordings,
+                    description=description,
+                    num_splits=num_splits,
+                )
+            else:
+                prediction = sample_obstacle_map(
+                    obstacle_map.unsqueeze(0), xyz.unsqueeze(0), description
+                ).squeeze(0)
 
             assert_eq(prediction.shape, (description.Nx * description.Ny,))
             prediction = prediction.reshape(description.Nx, description.Ny)
@@ -214,10 +399,6 @@ def plot_ground_truth(plt_axis, obstacle_map, description, locations=None):
                     prediction[1, px, py] = 0.0
                     prediction[2, px, py] = 0.0
 
-            # prediction = torch.clamp(prediction, min=0.0, max=1.0)
-            # assert_eq(prediction.shape, (1, (description.Nx * description.Ny)))
-            # prediction = prediction.reshape(1, description.Nx, description.Ny)
-
             slices.append(prediction)
 
         img_grid = torchvision.utils.make_grid(
@@ -227,71 +408,52 @@ def plot_ground_truth(plt_axis, obstacle_map, description, locations=None):
         plt_axis.axis("off")
 
 
-def plot_prediction(plt_axis, model, recordings, description):
-    with torch.no_grad():
-        assert isinstance(model, nn.Module)
-        assert isinstance(recordings, torch.Tensor)
-        assert isinstance(description, SimulationDescription)
-        C, L = recordings.shape
-        recordings = recordings.unsqueeze(0)
+def plot_ground_truth(plt_axis, obstacle_map, description, locations=None):
+    _plot_sdf_slices(
+        plt_axis=plt_axis,
+        model=None,
+        recordings=None,
+        obstacle_map=obstacle_map,
+        description=description,
+        num_splits=1,
+        locations=locations,
+    )
 
-        x_ls = torch.linspace(
-            start=description.xmin,
-            end=description.xmax,
-            steps=description.Nx,
-            device=the_device,
-        )
-        y_ls = torch.linspace(
-            start=description.ymin,
-            end=description.ymax,
-            steps=description.Ny,
-            device=the_device,
-        )
 
-        x_grid, y_grid = torch.meshgrid([x_ls, y_ls])
+def split_network_prediction(model, locations, recordings, description, num_splits):
+    assert isinstance(model, nn.Module)
+    assert isinstance(locations, torch.Tensor)
+    assert isinstance(recordings, torch.Tensor)
+    assert isinstance(description, SimulationDescription)
+    assert isinstance(num_splits, int)
+    N, D = locations.shape
+    locations = locations.reshape(1, N, D)
+    assert_eq(D, 3)
+    R, L = recordings.shape
+    assert_eq(L, description.output_length)
+    recordings = recordings.reshape(1, R, L)
+    splits = []
+    for i in range(num_splits):
+        split_lo = N * i // num_splits
+        split_hi = N * (i + 1) // num_splits
+        xyz_split = locations[:, split_lo:split_hi]
+        prediction_split = model(recordings=recordings, sample_locations=xyz_split)
+        splits.append(prediction_split)
+    prediction = torch.cat(splits, dim=1).squeeze(0)
+    assert_eq(prediction.shape, (N,))
+    return prediction
 
-        num_slices = 10
 
-        slices = []
-        for i in range(num_slices):
-            t = i / (num_slices - 1)
-            z = description.zmin + t * (description.zmax - description.zmin)
-
-            z_grid = z * torch.ones_like(x_grid)
-            xyz = torch.stack([x_grid, y_grid, z_grid], dim=2).to(the_device)
-            assert_eq(xyz.shape, (description.Nx, description.Ny, 3))
-            xyz = xyz.reshape(1, (description.Nx * description.Ny), 3)
-
-            num_splits = 8
-            assert (description.Nx * description.Ny) % num_splits == 0
-            split_size = (description.Nx * description.Ny) // num_splits
-            splits = []
-            for i in range(num_splits):
-                split_lo = i * split_size
-                split_hi = (i + 1) * split_size
-                xyz_split = xyz[:, split_lo:split_hi]
-                prediction_split = model(recordings, xyz_split)
-                splits.append(prediction_split)
-            prediction = torch.cat(splits, dim=1).squeeze(0)
-            # prediction = model(recordings, xyz)
-
-            assert_eq(prediction.shape, (description.Nx * description.Ny,))
-            prediction = prediction.reshape(description.Nx, description.Ny)
-
-            prediction = colourize_sdf(prediction)
-            assert_eq(prediction.shape, (3, description.Nx, description.Ny))
-
-            # prediction = torch.clamp(prediction, min=0.0, max=1.0)
-            # assert_eq(prediction.shape, (1, (description.Nx * description.Ny)))
-            # prediction = prediction.reshape(1, description.Nx, description.Ny)
-
-            slices.append(prediction.cpu())
-
-        img_grid = torchvision.utils.make_grid(
-            tensor=slices, nrow=5, pad_value=0.5
-        ).permute(2, 1, 0)
-        plt_axis.imshow(img_grid)
-        plt_axis.axis("off")
+def plot_prediction(plt_axis, model, recordings, description, num_splits):
+    _plot_sdf_slices(
+        plt_axis=plt_axis,
+        model=model,
+        recordings=recordings,
+        obstacle_map=None,
+        description=description,
+        num_splits=num_splits,
+        locations=None,
+    )
 
 
 def time_of_flight_crop(
@@ -726,12 +888,14 @@ def _raymarch_sdf_impl(
     obstacle_sdf,
     model,
     recordings,
+    num_splits,
 ):
     with torch.no_grad():
         assert is_three_floats(camera_center_xyz)
         assert is_three_floats(camera_up_xyz)
         assert is_three_floats(camera_right_xyz)
         assert isinstance(description, SimulationDescription)
+        assert isinstance(num_splits, int)
         if obstacle_sdf is not None:
             assert isinstance(obstacle_sdf, torch.Tensor)
             assert obstacle_sdf.shape == (
@@ -783,7 +947,7 @@ def _raymarch_sdf_impl(
             l_flat = l.reshape(1, 3, x_resolution * y_resolution).permute(0, 2, 1)
             assert l_flat.shape == (1, x_resolution * y_resolution, 3)
             if prediction:
-                num_splits = 256  # 128
+                # num_splits = 256  # 128
                 split_size = (x_resolution * y_resolution) // num_splits
                 values_acc = []
                 for i in range(num_splits):
@@ -900,6 +1064,7 @@ def raymarch_sdf_ground_truth(
     y_resolution,
     description,
     obstacle_sdf,
+    num_splits,
 ):
     return _raymarch_sdf_impl(
         camera_center_xyz=camera_center_xyz,
@@ -911,6 +1076,7 @@ def raymarch_sdf_ground_truth(
         obstacle_sdf=obstacle_sdf,
         model=None,
         recordings=None,
+        num_splits=num_splits,
     )
 
 
@@ -923,6 +1089,7 @@ def raymarch_sdf_prediction(
     description,
     model,
     recordings,
+    num_splits,
 ):
     return _raymarch_sdf_impl(
         camera_center_xyz=camera_center_xyz,
@@ -934,4 +1101,5 @@ def raymarch_sdf_prediction(
         obstacle_sdf=None,
         model=model,
         recordings=recordings,
+        num_splits=num_splits,
     )

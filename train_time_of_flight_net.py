@@ -17,16 +17,22 @@ from device_dict import DeviceDict
 from dataset3d import WaveDataset3d
 from time_of_flight_net import TimeOfFlightNet
 from tof_utils import (
+    SplitSize,
+    all_grid_locations,
+    evaluate_prediction,
     make_random_training_locations,
+    make_receiver_indices,
     plot_ground_truth,
     plot_prediction,
     raymarch_sdf_ground_truth,
     raymarch_sdf_prediction,
     sample_obstacle_map,
+    split_network_prediction,
+    split_till_it_fits,
     vector_normalize,
 )
 from utils import progress_bar
-from current_simulation_description import make_simulation_description
+from current_simulation_description import make_simulation_description, minimum_x_units
 from plot_utils import LossPlotter, plt_screenshot
 from torch.utils.data._utils.collate import default_collate
 
@@ -55,19 +61,33 @@ def main():
     parser.add_argument(
         "--nodisplay", dest="nodisplay", default=False, action="store_true"
     )
+    parser.add_argument(
+        "--raymarch", dest="raymarch", default=False, action="store_true"
+    )
     parser.add_argument("--plotinterval", type=int, dest="plotinterval", default=512)
     parser.add_argument(
         "--validationinterval", type=int, dest="validationinterval", default=256
+    )
+    parser.add_argument("--receivercountx", type=int, dest="receivercountx", default=2)
+    parser.add_argument("--receivercounty", type=int, dest="receivercounty", default=2)
+    parser.add_argument("--receivercountz", type=int, dest="receivercountz", default=2)
+    parser.add_argument(
+        "--restoremodelpath", type=str, dest="restoremodelpath", default=None
+    )
+    parser.add_argument(
+        "--restoreoptimizerpath", type=str, dest="restoreoptimizerpath", default=None
     )
 
     args = parser.parse_args()
     description = make_simulation_description()
 
-    # for i in range(description.sensor_count):
-    #     print(f"{i}    {description.sensor_locations[i]}")
+    assert (args.restoremodelpath is None) == (args.restoreoptimizerpath is None)
 
-    # sensor_indices = range(16, 32, 1)
-    sensor_indices = range(0, 64, 1)
+    sensor_indices = make_receiver_indices(
+        args.receivercountx,
+        args.receivercounty,
+        args.receivercountz,
+    )
 
     print(f"Using {len(sensor_indices)} receivers in total")
 
@@ -114,10 +134,53 @@ def main():
         receiver_locations=description.sensor_locations[sensor_indices],
     ).to(the_device)
 
+    validation_splits = SplitSize("compute_validation_metrics")
+
+    def compute_validation_metrics():
+        with torch.no_grad():
+            print("Computing validation metrics")
+            total_metrics = {}
+            locations = all_grid_locations(the_device, description)
+            N = len(val_set)
+            for i, dd in enumerate(val_set):
+                sdf_gt = dd["sdf"][minimum_x_units:].to(the_device)
+                recordings = dd["sensor_recordings"][sensor_indices].to(the_device)
+
+                sdf_pred = split_till_it_fits(
+                    split_network_prediction,
+                    validation_splits,
+                    model=model,
+                    locations=locations,
+                    recordings=recordings,
+                    description=description,
+                )
+                sdf_pred = sdf_pred.reshape(
+                    (description.Nx - minimum_x_units), description.Ny, description.Nz
+                )
+                metrics = evaluate_prediction(
+                    sdf_pred,
+                    sdf_gt,
+                    description,
+                )
+
+                assert isinstance(metrics, dict)
+                for k, v in metrics.items():
+                    assert isinstance(v, float)
+                    if not k in total_metrics:
+                        total_metrics[k] = []
+                    total_metrics[k].append(v)
+                progress_bar(i, N)
+
+            mean_metrics = {}
+            for k, v in total_metrics.items():
+                mean_metrics[k] = np.mean(v)
+            return mean_metrics
+
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    restore_module(model, "models/model_5367.dat")
-    restore_module(optimizer, "models/optimizer_5367.dat")
+    if args.restoremodelpath is not None:
+        restore_module(model, args.restoremodelpath)
+        restore_module(optimizer, args.restoreoptimizerpath)
 
     model_path = os.environ.get("TRAINING_MODEL_PATH")
 
@@ -134,14 +197,16 @@ def main():
 
     log_path = os.path.join(log_path_root, log_folder_name)
 
-    def save_things(iteration):
+    def save_things(iteration, suffix=None):
+        assert isinstance(iteration, int)
+        assert suffix is None or isinstance(suffix, str)
         save_module(
             model,
-            f"models/model_{iteration + 1}.dat",
+            f"models/model_{iteration + 1}{suffix or ''}.dat",
         )
         save_module(
             optimizer,
-            f"models/optimizer_{iteration + 1}.dat",
+            f"models/optimizer_{iteration + 1}{suffix or ''}.dat",
         )
 
     try:
@@ -150,26 +215,31 @@ def main():
             if not args.nodisplay:
                 plt.ion()
 
-            fig, axes = plt.subplots(2, 5, figsize=(22, 10), dpi=80)
+            num_cols = 5 if args.raymarch else 3
+
+            fig, axes = plt.subplots(2, num_cols, figsize=(22, 10), dpi=80)
             fig.tight_layout(rect=(0.0, 0.05, 1.0, 0.95))
 
-            ax_t1 = axes[0, 0]
-            ax_t2 = axes[0, 1]
-            ax_t3 = axes[0, 2]
-            ax_t4 = axes[0, 3]
-            ax_t5 = axes[0, 4]
-            ax_b1 = axes[1, 0]
-            ax_b2 = axes[1, 1]
-            ax_b3 = axes[1, 2]
-            ax_b4 = axes[1, 3]
-            ax_b5 = axes[1, 4]
+            ax_sdf_gt_train = axes[0, 0]
+            ax_sdf_gt_val = axes[1, 0]
+            ax_sdf_pred_train = axes[0, 1]
+            ax_sdf_pred_val = axes[1, 1]
+            ax_raymarch_gt_train = axes[0, 2] if args.raymarch else None
+            ax_raymarch_gt_val = axes[1, 2] if args.raymarch else None
+            ax_raymarch_pred_train = axes[0, 3] if args.raymarch else None
+            ax_raymarch_pred_val = axes[1, 3] if args.raymarch else None
+            ax_loss_train = axes[0, 4] if args.raymarch else axes[0, 2]
+            ax_loss_val = axes[1, 4] if args.raymarch else axes[1, 2]
+
+            sdf_slice_prediction_splits = SplitSize("SDF slice prediction")
+
             num_epochs = 1000000
             train_loss_plotter = LossPlotter(
                 aggregation_interval=256, colour=(0.0, 0.0, 1.0), num_quantiles=10
             )
             val_loss_y = []
             val_loss_x = []
-            best_val_loss = np.inf
+            best_val_mse = np.inf
             global_iteration = 0
 
             for i_epoch in range(num_epochs):
@@ -217,22 +287,21 @@ def main():
 
                     if ((global_iteration + 1) % args.validationinterval) == 0:
                         print("Computing validation loss...")
-                        # curr_val_loss = validation_loss(model)
-                        curr_val_loss = np.nan
-                        if curr_val_loss < best_val_loss:
-                            best_val_loss = curr_val_loss
-                            # if not args.nosave:
-                            # model.save(make_model_filename("best"))
+                        curr_val_metrics = compute_validation_metrics()
+                        curr_val_mse = curr_val_metrics["mean_squared_error_sdf"]
+                        if curr_val_mse < best_val_mse:
+                            best_val_loss = curr_val_mse
+                            if not args.nosave:
+                                save_things(global_iteration, "_best")
 
                         # if not args.nosave:
                         # model.save(make_model_filename("latest"))
 
                         val_loss_x.append(global_iteration)
-                        val_loss_y.append(curr_val_loss)
+                        val_loss_y.append(curr_val_mse)
 
-                        writer.add_scalar(
-                            "validation loss", curr_val_loss, global_iteration
-                        )
+                        for k, v in curr_val_metrics.items():
+                            writer.add_scalar(f"validation_{k}", v, global_iteration)
 
                     time_to_plot = (
                         (global_iteration + 1) % args.plotinterval
@@ -249,151 +318,158 @@ def main():
                         val_batch_gpu = val_batch_cpu.to(the_device)
 
                         # clear figures for a new update
-                        ax_t1.cla()
-                        ax_b1.cla()
-                        ax_t2.cla()
-                        ax_b2.cla()
-                        ax_t3.cla()
-                        ax_b3.cla()
-                        ax_t4.cla()
-                        ax_b4.cla()
-                        ax_t5.cla()
-                        ax_b5.cla()
+                        ax_sdf_gt_train.cla()
+                        ax_sdf_gt_val.cla()
+                        ax_sdf_pred_train.cla()
+                        ax_sdf_pred_val.cla()
+                        if args.raymarch:
+                            ax_raymarch_gt_train.cla()
+                            ax_raymarch_gt_val.cla()
+                            ax_raymarch_pred_train.cla()
+                            ax_raymarch_pred_val.cla()
+                        ax_loss_train.cla()
+                        ax_loss_val.cla()
 
                         # plt.gcf().suptitle(args.experiment)
 
                         # plot the input waveforms
-                        ax_t1.title.set_text("Input (train)")
+                        # ax_input_train.title.set_text("Input (train)")
                         # plot_inputs(ax_t1, batch_cpu, description)
-                        ax_b1.title.set_text("Input (validation)")
+                        # ax_input_val.title.set_text("Input (validation)")
                         # plot_inputs(ax_b1, val_batch_cpu, description)
 
                         # plot the ground truth obstacles
-                        ax_t1.title.set_text("Ground Truth SDF (train)")
+                        ax_sdf_gt_train.title.set_text("Ground Truth SDF (train)")
                         plot_ground_truth(
-                            ax_t1,
-                            batch_cpu["sdf"][0],
+                            ax_sdf_gt_train,
+                            batch_gpu["sdf"][0],
                             description,
-                            locations=locations[0].cpu(),
+                            locations=locations[0].to(the_device),
                         )
-                        ax_b1.title.set_text("Ground Truth SDF (validation)")
+                        ax_sdf_gt_val.title.set_text("Ground Truth SDF (validation)")
                         plot_ground_truth(
-                            ax_b1,
-                            val_batch_cpu["sdf"][0],
+                            ax_sdf_gt_val,
+                            val_batch_gpu["sdf"][0],
                             description,
                         )
 
                         # plot the predicted sdf
-                        ax_t2.title.set_text("Predicted SDF (train)")
-                        plot_prediction(
-                            ax_t2,
+                        ax_sdf_pred_train.title.set_text("Predicted SDF (train)")
+                        split_till_it_fits(
+                            plot_prediction,
+                            sdf_slice_prediction_splits,
+                            ax_sdf_pred_train,
                             model,
                             batch_gpu["sensor_recordings"][0, sensor_indices],
                             description,
                         )
-                        ax_b2.title.set_text("Predicted SDF (validation)")
-                        plot_prediction(
-                            ax_b2,
+                        ax_sdf_pred_val.title.set_text("Predicted SDF (validation)")
+                        split_till_it_fits(
+                            plot_prediction,
+                            sdf_slice_prediction_splits,
+                            ax_sdf_pred_val,
                             model,
                             val_batch_gpu["sensor_recordings"][0, sensor_indices],
                             description,
                         )
 
-                        # rm_camera_center = [0.0, 0.0, 0.0]
-                        # rm_camera_up = [0.0, 0.5 * description.Ny * description.dy, 0.0]
-                        # rm_camera_right = [
-                        #     0.0,
-                        #     0.0,
-                        #     0.5 * description.Nz * description.dz,
-                        # ]
-                        # rm_x_resolution = 128
-                        # rm_y_resolution = 128
+                        if args.raymarch:
 
-                        rm_camera_center = [-0.2, -0.4, 1.0]
-                        rm_camera_up = vector_normalize([-0.2, 1.0, 0.2], norm=0.5)
-                        rm_camera_right = vector_normalize([1.0, 0.0, 1.0], norm=1.0)
-                        rm_x_resolution = 256
-                        rm_y_resolution = 128
-
-                        ax_t3.title.set_text("Ground Truth Raymarch (train)")
-                        print("Raymarching ground truth (train)")
-                        ax_t3.imshow(
-                            raymarch_sdf_ground_truth(
-                                camera_center_xyz=rm_camera_center,
-                                camera_up_xyz=rm_camera_up,
-                                camera_right_xyz=rm_camera_right,
-                                x_resolution=rm_x_resolution,
-                                y_resolution=rm_y_resolution,
-                                description=description,
-                                obstacle_sdf=batch_gpu["sdf"][0],
+                            rm_camera_center = [-0.2, -0.4, 1.0]
+                            rm_camera_up = vector_normalize([-0.2, 1.0, 0.2], norm=0.5)
+                            rm_camera_right = vector_normalize(
+                                [1.0, 0.0, 1.0], norm=1.0
                             )
-                            .cpu()
-                            .permute(2, 1, 0)
-                        )
+                            rm_x_resolution = 256
+                            rm_y_resolution = 128
 
-                        ax_b3.title.set_text("Ground Truth Raymarch (validation)")
-                        print("Raymarching ground truth (validation)")
-                        ax_b3.imshow(
-                            raymarch_sdf_ground_truth(
-                                camera_center_xyz=rm_camera_center,
-                                camera_up_xyz=rm_camera_up,
-                                camera_right_xyz=rm_camera_right,
-                                x_resolution=rm_x_resolution,
-                                y_resolution=rm_y_resolution,
-                                description=description,
-                                obstacle_sdf=val_batch_gpu["sdf"][0],
+                            ax_raymarch_gt_train.title.set_text(
+                                "Ground Truth Raymarch (train)"
                             )
-                            .cpu()
-                            .permute(2, 1, 0)
-                        )
+                            print("Raymarching ground truth (train)")
+                            ax_raymarch_gt_train.imshow(
+                                raymarch_sdf_ground_truth(
+                                    camera_center_xyz=rm_camera_center,
+                                    camera_up_xyz=rm_camera_up,
+                                    camera_right_xyz=rm_camera_right,
+                                    x_resolution=rm_x_resolution,
+                                    y_resolution=rm_y_resolution,
+                                    description=description,
+                                    obstacle_sdf=batch_gpu["sdf"][0],
+                                )
+                                .cpu()
+                                .permute(2, 1, 0)
+                            )
 
-                        ax_t4.title.set_text("Predicted Raymarch (train)")
-                        print("Raymarching prediction (train)")
-                        ax_t4.imshow(
-                            raymarch_sdf_prediction(
-                                camera_center_xyz=rm_camera_center,
-                                camera_up_xyz=rm_camera_up,
-                                camera_right_xyz=rm_camera_right,
-                                x_resolution=rm_x_resolution,
-                                y_resolution=rm_y_resolution,
-                                description=description,
-                                model=model,
-                                recordings=batch_gpu["sensor_recordings"][
-                                    0, sensor_indices
-                                ],
+                            ax_raymarch_gt_val.title.set_text(
+                                "Ground Truth Raymarch (validation)"
                             )
-                            .cpu()
-                            .permute(2, 1, 0)
-                        )
+                            print("Raymarching ground truth (validation)")
+                            ax_raymarch_gt_val.imshow(
+                                raymarch_sdf_ground_truth(
+                                    camera_center_xyz=rm_camera_center,
+                                    camera_up_xyz=rm_camera_up,
+                                    camera_right_xyz=rm_camera_right,
+                                    x_resolution=rm_x_resolution,
+                                    y_resolution=rm_y_resolution,
+                                    description=description,
+                                    obstacle_sdf=val_batch_gpu["sdf"][0],
+                                )
+                                .cpu()
+                                .permute(2, 1, 0)
+                            )
 
-                        ax_b4.title.set_text("Predicted Raymarch (validation)")
-                        print("Raymarching prediction (validation)")
-                        ax_b4.imshow(
-                            raymarch_sdf_prediction(
-                                camera_center_xyz=rm_camera_center,
-                                camera_up_xyz=rm_camera_up,
-                                camera_right_xyz=rm_camera_right,
-                                x_resolution=rm_x_resolution,
-                                y_resolution=rm_y_resolution,
-                                description=description,
-                                model=model,
-                                recordings=val_batch_gpu["sensor_recordings"][
-                                    0, sensor_indices
-                                ],
+                            ax_raymarch_pred_train.title.set_text(
+                                "Predicted Raymarch (train)"
                             )
-                            .cpu()
-                            .permute(2, 1, 0)
-                        )
+                            print("Raymarching prediction (train)")
+                            ax_raymarch_pred_train.imshow(
+                                raymarch_sdf_prediction(
+                                    camera_center_xyz=rm_camera_center,
+                                    camera_up_xyz=rm_camera_up,
+                                    camera_right_xyz=rm_camera_right,
+                                    x_resolution=rm_x_resolution,
+                                    y_resolution=rm_y_resolution,
+                                    description=description,
+                                    model=model,
+                                    recordings=batch_gpu["sensor_recordings"][
+                                        0, sensor_indices
+                                    ],
+                                )
+                                .cpu()
+                                .permute(2, 1, 0)
+                            )
+
+                            ax_raymarch_pred_val.title.set_text(
+                                "Predicted Raymarch (validation)"
+                            )
+                            print("Raymarching prediction (validation)")
+                            ax_raymarch_pred_val.imshow(
+                                raymarch_sdf_prediction(
+                                    camera_center_xyz=rm_camera_center,
+                                    camera_up_xyz=rm_camera_up,
+                                    camera_right_xyz=rm_camera_right,
+                                    x_resolution=rm_x_resolution,
+                                    y_resolution=rm_y_resolution,
+                                    description=description,
+                                    model=model,
+                                    recordings=val_batch_gpu["sensor_recordings"][
+                                        0, sensor_indices
+                                    ],
+                                )
+                                .cpu()
+                                .permute(2, 1, 0)
+                            )
 
                         # plot the training loss on a log plot
-                        ax_t5.title.set_text("Training Loss")
-                        train_loss_plotter.plot_to(ax_t5)
-                        ax_t5.set_yscale("log")
+                        ax_loss_train.title.set_text("Training Loss")
+                        train_loss_plotter.plot_to(ax_loss_train)
+                        ax_loss_train.set_yscale("log")
 
                         # plot the validation loss on a log plot
-                        ax_b5.title.set_text("Validation Loss")
-                        ax_b5.set_yscale("log")
-                        ax_b5.plot(val_loss_x, val_loss_y, c="Red")
+                        ax_loss_val.title.set_text("Validation Loss")
+                        ax_loss_val.set_yscale("log")
+                        ax_loss_val.plot(val_loss_x, val_loss_y, c="Red")
 
                         # Note: calling show or pause will cause a bad time
                         fig.canvas.draw()
@@ -413,7 +489,7 @@ def main():
                         model.train()
 
                     if ((global_iteration + 1) % 65536) == 0:
-                        save_things(global_iteration)
+                        save_things(global_iteration, "_latest")
 
                     global_iteration += 1
 
@@ -421,7 +497,7 @@ def main():
 
     except KeyboardInterrupt:
         print("\n\nControl-C detected, saving model...\n")
-        save_things(global_iteration)
+        save_things(global_iteration, "_aborted")
         print("Exiting")
         exit(1)
 
