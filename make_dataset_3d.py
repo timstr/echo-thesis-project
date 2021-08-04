@@ -100,10 +100,10 @@ def main():
         except StopIteration:
             pass
 
-    dataset = WaveDataset3d(desc, dataset_path)
+    dataset = WaveDataset3d(desc, dataset_path, write=True)
 
     for i, (o, s) in enumerate(obstacles_subset()):
-        print(f"{i} - Creating dataset example \"{s}\"")
+        print(f'{i} - Creating dataset example "{s}"')
         dataset.simulate_and_append_to_dataset(o)
 
 

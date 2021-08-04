@@ -11,6 +11,10 @@ Ny = 60
 Nz = 60
 minimum_x_units = 60
 
+sensor_count_x = 4
+sensor_count_y = 4
+sensor_count_z = 4
+
 
 def make_simulation_description():
     c_air = 343.0
@@ -26,10 +30,6 @@ def make_simulation_description():
     sensor_center_x = 16
     sensor_center_y = Ny // 2
     sensor_center_z = Nz // 2
-
-    sensor_count_x = 4
-    sensor_count_y = 4
-    sensor_count_z = 4
 
     sensor_spacing = 4
 

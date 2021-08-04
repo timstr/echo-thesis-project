@@ -10,13 +10,15 @@ from device_dict import DeviceDict
 
 
 class WaveDataset3d(torch.utils.data.Dataset):
-    def __init__(self, description, path_to_h5file):
+    def __init__(self, description, path_to_h5file, write=False):
         super(WaveDataset3d, self).__init__()
         assert isinstance(description, SimulationDescription)
         assert isinstance(path_to_h5file, str)
+        assert isinstance(write, bool)
         self.description = description
         # IMPORTANT: don't open the file in truncate mode or the dataset will be gone
-        self.h5file = h5py.File(path_to_h5file, "a")
+        self.h5file = h5py.File(path_to_h5file, "a" if write else "r")
+        self.write = write
         assert self.h5file
 
         self.Nx = H5DS(name="Nx", dtype=np.uint32)
@@ -69,12 +71,13 @@ class WaveDataset3d(torch.utils.data.Dataset):
             extensible=True,
         )
 
-        if len(self.h5file.keys()) == 0:
+        if len(self.h5file.keys()) == 0 and write:
             self._create_empty_dataset()
 
         self.validate()
 
     def _create_empty_dataset(self):
+        assert self.write, "The dataset must be opened with write=True"
         assert self.h5file, "The file must be open"
         assert len(self.h5file.keys()) == 0, "The file must be empty"
         assert len(self.h5file.attrs.keys()) == 0, "The file must be empty"
@@ -143,12 +146,14 @@ class WaveDataset3d(torch.utils.data.Dataset):
         )
 
     def simulate_and_append_to_dataset(self, obstacles):
+        assert self.write, "The dataset must be opened with write=True"
         assert self.h5file, "The file must be open"
         self.description.set_obstacles(obstacles)
         results = self.description.run()
         self.append_to_dataset(obstacles, results)
 
     def append_to_dataset(self, obstacles, recordings, sdf=None):
+        assert self.write, "The dataset must be opened with write=True"
         assert self.h5file, "The file must be open"
         assert isinstance(obstacles, np.ndarray) or isinstance(obstacles, torch.Tensor)
         assert obstacles.dtype in [np.bool8, torch.bool]

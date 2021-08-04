@@ -91,7 +91,14 @@ def main():
 
     print(f"Using {len(sensor_indices)} receivers in total")
 
-    dataset = WaveDataset3d(description, "dataset_v5_compressed.h5")
+    dataset_path = os.environ.get("WAVESIM_DATASET")
+
+    if dataset_path is None or not os.path.isfile(dataset_path):
+        raise Exception(
+            "Please set the WAVESIM_DATASET environment variable to point to the WaveSim dataset HDF5 file"
+        )
+
+    dataset = WaveDataset3d(description=description, path_to_h5file=dataset_path)
 
     val_ratio = 0.1
     val_size = int(len(dataset) * val_ratio)
@@ -182,12 +189,20 @@ def main():
         restore_module(model, args.restoremodelpath)
         restore_module(optimizer, args.restoreoptimizerpath)
 
-    model_path = os.environ.get("TRAINING_MODEL_PATH")
+    base_model_path = os.environ.get("TRAINING_MODEL_PATH")
 
-    if model_path is None or not os.path.exists(model_path):
+    if base_model_path is None or not os.path.exists(base_model_path):
         raise Exception(
             "Please set the TRAINING_MODEL_PATH environment variable to point to the desired model directory"
         )
+
+    model_path = os.path.join(base_model_path, args.experiment)
+    if os.path.exists(model_path):
+        raise Exception(
+            f'Error: attempted to create a folder for saving models at "{model_path}" but the folder already exists.'
+        )
+
+    os.makedirs(model_path)
 
     timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
 
@@ -202,11 +217,17 @@ def main():
         assert suffix is None or isinstance(suffix, str)
         save_module(
             model,
-            f"models/model_{iteration + 1}{suffix or ''}.dat",
+            os.path.join(
+                model_path,
+                f"model_{iteration + 1}{suffix or ''}.dat",
+            ),
         )
         save_module(
             optimizer,
-            f"models/optimizer_{iteration + 1}{suffix or ''}.dat",
+            os.path.join(
+                model_path,
+                f"optimizer_{iteration + 1}{suffix or ''}.dat",
+            ),
         )
 
     try:
@@ -476,7 +497,7 @@ def main():
                         fig.canvas.flush_events()
 
                         plt_screenshot(fig).save(
-                            log_path + "/image_" + str(global_iteration + 1) + ".png"
+                            os.path.join(log_path, f"image_{global_iteration + 1}.png")
                         )
 
                         if (

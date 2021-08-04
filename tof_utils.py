@@ -32,6 +32,11 @@ def split_till_it_fits(fn, split_size, *args, **kwargs):
     assert isinstance(split_size, SplitSize)
     split_size_was_increased = False
     max_size = 1024 * 1024
+    recoverable_exceptions = [
+        "out of memory",
+        "not enough memory",
+        "This error may appear if you passed in a non-contiguous input",
+    ]
     while split_size.get() <= max_size:
         try:
             ret = fn(*args, **kwargs, num_splits=split_size.get())
@@ -42,7 +47,7 @@ def split_till_it_fits(fn, split_size, *args, **kwargs):
             return ret
         except RuntimeError as e:
             se = str(e)
-            oom = ("out of memory" in se) or ("not enough memory" in se)
+            oom = any([excp in se for excp in recoverable_exceptions])
             if not oom:
                 raise e
             torch.cuda.empty_cache()

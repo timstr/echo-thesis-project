@@ -84,39 +84,40 @@ class TimeOfFlightNet(nn.Module):
         #     nn.Linear(in_features=hidden_features, out_features=1),
         # )
 
-        # # HACK
-        assert crop_length_samples == 128
+        conv_features = 128
+        final_length = crop_length_samples // 8
+        final_features = 32
 
         self.model = nn.Sequential(
             nn.BatchNorm1d(num_features=num_receivers),
             nn.Conv1d(
                 in_channels=num_receivers,
-                out_channels=128,
+                out_channels=conv_features,
                 kernel_size=15,
                 stride=2,
                 padding=7,
             ),
             nn.ReLU(),
-            nn.BatchNorm1d(num_features=128),
+            nn.BatchNorm1d(num_features=conv_features),
             nn.Conv1d(
-                in_channels=128,
-                out_channels=128,
+                in_channels=conv_features,
+                out_channels=conv_features,
                 kernel_size=15,
                 stride=2,
                 padding=7,
             ),
             nn.ReLU(),
-            nn.BatchNorm1d(num_features=128),
+            nn.BatchNorm1d(num_features=conv_features),
             nn.Conv1d(
-                in_channels=128,
-                out_channels=16,
+                in_channels=conv_features,
+                out_channels=final_features,
                 kernel_size=15,
                 stride=2,
                 padding=7,
             ),
             nn.ReLU(),
-            Reshape((16, 16), (16 * 16,)),
-            nn.Linear(in_features=(16 * 16), out_features=1),
+            Reshape((final_features, final_length), (final_features * final_length,)),
+            nn.Linear(in_features=(final_features * final_length), out_features=1),
         )
 
     def forward(self, recordings, sample_locations):
