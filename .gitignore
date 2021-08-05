@@ -14,3 +14,5 @@ images/
 **/*.npz
 temp_img/
 *.gif
+.vscode/
+blechh/
