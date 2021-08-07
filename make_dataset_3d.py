@@ -194,7 +194,7 @@ def main():
         results = desc.run()
         sdf = obstacle_map_to_sdf(torch.tensor(o).cuda(), desc).cpu().numpy()
         with WaveDataset3d(desc, dataset_path, write=True) as dataset:
-            dataset.append_to_dataset(obstacles=o, recordsings=results, sdf=sdf)
+            dataset.append_to_dataset(obstacles=o, recordings=results, sdf=sdf)
 
 
 if __name__ == "__main__":
