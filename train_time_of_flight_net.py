@@ -84,9 +84,7 @@ def main():
     assert (args.restoremodelpath is None) == (args.restoreoptimizerpath is None)
 
     sensor_indices = make_receiver_indices(
-        args.receivercountx,
-        args.receivercounty,
-        args.receivercountz,
+        args.receivercountx, args.receivercounty, args.receivercountz,
     )
 
     print(f"Using {len(sensor_indices)} receivers in total")
@@ -164,11 +162,7 @@ def main():
                 sdf_pred = sdf_pred.reshape(
                     (description.Nx - minimum_x_units), description.Ny, description.Nz
                 )
-                metrics = evaluate_prediction(
-                    sdf_pred,
-                    sdf_gt,
-                    description,
-                )
+                metrics = evaluate_prediction(sdf_pred, sdf_gt, description,)
 
                 assert isinstance(metrics, dict)
                 for k, v in metrics.items():
@@ -217,17 +211,11 @@ def main():
         assert suffix is None or isinstance(suffix, str)
         save_module(
             model,
-            os.path.join(
-                model_path,
-                f"model_{iteration + 1}{suffix or ''}.dat",
-            ),
+            os.path.join(model_path, f"model_{iteration + 1}{suffix or ''}.dat",),
         )
         save_module(
             optimizer,
-            os.path.join(
-                model_path,
-                f"optimizer_{iteration + 1}{suffix or ''}.dat",
-            ),
+            os.path.join(model_path, f"optimizer_{iteration + 1}{suffix or ''}.dat",),
         )
 
     try:
@@ -369,9 +357,7 @@ def main():
                         )
                         ax_sdf_gt_val.title.set_text("Ground Truth SDF (validation)")
                         plot_ground_truth(
-                            ax_sdf_gt_val,
-                            val_batch_gpu["sdf"][0],
-                            description,
+                            ax_sdf_gt_val, val_batch_gpu["sdf"][0], description,
                         )
 
                         # plot the predicted sdf

@@ -64,8 +64,7 @@ class TimeOfFlightNet(nn.Module):
         )
         assert receiver_locations_tensor.shape == (num_receivers, 3)
         self.receiver_locations = nn.parameter.Parameter(
-            data=receiver_locations_tensor,
-            requires_grad=False,
+            data=receiver_locations_tensor, requires_grad=False,
         )
 
         # Simple 2-layer fully-connected model

@@ -144,10 +144,7 @@ def main():
             print(f"Saving parameters to {fname}...")
             with open(fname, "wb") as f:
                 pickle.dump(
-                    {
-                        "half_pad_kernel": half_pad_kernel.detach().cpu().numpy(),
-                    },
-                    f,
+                    {"half_pad_kernel": half_pad_kernel.detach().cpu().numpy(),}, f,
                 )
 
         if i % 10 == 0:

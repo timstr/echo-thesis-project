@@ -329,11 +329,7 @@ class SimulationDescription:
 
         with h5py.File(hdf5_output_file_path, "r") as interpolation_function:
             pressure_vs_time = np.array(interpolation_function["p"])
-            assert pressure_vs_time.shape == (
-                1,
-                self.Nt,
-                self.sensor_count,
-            )
+            assert pressure_vs_time.shape == (1, self.Nt, self.sensor_count,)
 
         signals = pressure_vs_time[0].transpose(1, 0)
         assert signals.shape == (self.sensor_count, self.Nt)
@@ -355,10 +351,7 @@ class SimulationDescription:
             # )
             signals_lowpassed = signal.sosfilt(sos=sos, x=signals, axis=1)
 
-            assert signals_lowpassed.shape == (
-                self.sensor_count,
-                self.Nt,
-            )
+            assert signals_lowpassed.shape == (self.sensor_count, self.Nt,)
 
             # This introduces high-frequency artefacts which I do not like one bit
             # signals_resampled = signal.resample(
@@ -374,10 +367,7 @@ class SimulationDescription:
             signals_resampled = interpolation_function(x_new)
 
             assert isinstance(signals_resampled, np.ndarray)
-            assert signals_resampled.shape == (
-                self.sensor_count,
-                self.output_length,
-            )
+            assert signals_resampled.shape == (self.sensor_count, self.output_length,)
             signals = signals_resampled
 
         os.remove(hdf5_input_file_path)

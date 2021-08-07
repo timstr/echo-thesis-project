@@ -1,6 +1,4 @@
-from config import (
-    OutputConfig,
-)
+from config import OutputConfig
 from config_constants import (
     output_format_depthmap,
     output_format_heatmap,

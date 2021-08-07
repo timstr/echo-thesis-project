@@ -27,7 +27,7 @@ def make_script(mode, worker_index, num_workers, count):
     cd /home/timstr/echo
 
     export ECHO4CH_OBSTACLES=/project/st-rhodin-1/users/timstr/echo4ch_obstacles.h5
-    export DATASET_OUTPUT=/scratch/st-rhodin-1/users/timstr/echo/dataset_{mode}_{worker_index + 1}_of_{num_workers}.h5
+    export DATASET_OUTPUT=/scratch/st-rhodin-1/users/timstr/echo/dataset_echo4ch_{worker_index + 1}_of_{num_workers}.h5
     export KWAVE_EXECUTABLE=/home/timstr/k-wave/kspaceFirstOrder-CUDA/kspaceFirstOrder-CUDA
     export KWAVE_TEMP_FOLDER=/scratch/st-rhodin-1/users/timstr/echo/temp/{desc}
 
@@ -49,4 +49,6 @@ def make_script(mode, worker_index, num_workers, count):
 num_workers = 16
 for mode in ["random-inner", "random-outer"]:
     for worker_index in range(num_workers):
-        make_script(mode=mode, worker_index=worker_index, num_workers=num_workers, count=12000)
+        make_script(
+            mode=mode, worker_index=worker_index, num_workers=num_workers, count=12000
+        )

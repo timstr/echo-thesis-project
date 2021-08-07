@@ -2,9 +2,7 @@ import math
 import random
 
 from simulation_description import AcousticMediumProperties, SimulationDescription
-from kwave_util import (
-    make_ball,
-)
+from kwave_util import make_ball
 
 Nx = 180
 Ny = 60
