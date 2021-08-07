@@ -20,6 +20,8 @@ from utils import assert_eq
 
 
 def middle_is_empty(obstacles):
+    if isinstance(obstacles, np.ndarray):
+        obstacles = torch.tensor(obstacles)
     assert isinstance(obstacles, torch.Tensor)
     assert_eq(obstacles.shape, (Nx, Ny, Nz))
     assert_eq(obstacles.dtype, torch.bool)
@@ -33,6 +35,8 @@ def middle_is_empty(obstacles):
 
 
 def outside_is_empty(obstacles):
+    if isinstance(obstacles, np.ndarray):
+        obstacles = torch.tensor(obstacles)
     assert isinstance(obstacles, torch.Tensor)
     assert_eq(obstacles.shape, (Nx, Ny, Nz))
     assert_eq(obstacles.dtype, torch.bool)

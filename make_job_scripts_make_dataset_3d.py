@@ -8,7 +8,7 @@ if not os.path.exists(out_folder):
     os.makedirs(out_folder)
 
 
-def make_script(mode, worker_index, num_workers):
+def make_script(mode, worker_index, num_workers, count):
     desc = f"make_dataset_{mode}_{worker_index + 1}_of_{num_workers}"
     contents = f"""\
     #!/bin/bash
@@ -27,7 +27,7 @@ def make_script(mode, worker_index, num_workers):
     cd /home/timstr/echo
 
     export ECHO4CH_OBSTACLES=/project/st-rhodin-1/users/timstr/echo4ch_obstacles.h5
-    export DATASET_OUTPUT=/scratch/st-rhodin-1/users/timstr/echo/dataset_echo4ch_{worker_index + 1}_of_{num_workers}.h5
+    export DATASET_OUTPUT=/scratch/st-rhodin-1/users/timstr/echo/dataset_{mode}_{worker_index + 1}_of_{num_workers}.h5
     export KWAVE_EXECUTABLE=/home/timstr/k-wave/kspaceFirstOrder-CUDA/kspaceFirstOrder-CUDA
     export KWAVE_TEMP_FOLDER=/scratch/st-rhodin-1/users/timstr/echo/temp/{desc}
 
@@ -35,8 +35,9 @@ def make_script(mode, worker_index, num_workers):
     python3 make_dataset_3d.py \\
         --numworkers={num_workers} \\
         --workerindex={worker_index} \\
-        --mode={mode}
-    
+        --mode={mode} \\
+        --count={count}
+
     echo "Dataset generation completed."
     """
     contents = textwrap.dedent(contents)
@@ -46,5 +47,6 @@ def make_script(mode, worker_index, num_workers):
 
 
 num_workers = 16
-for worker_index in range(num_workers):
-    make_script(mode="echo4ch", worker_index=worker_index, num_workers=num_workers)
+for mode in ["random-inner", "random-outer"]:
+    for worker_index in range(num_workers):
+        make_script(mode=mode, worker_index=worker_index, num_workers=num_workers, count=12000)
