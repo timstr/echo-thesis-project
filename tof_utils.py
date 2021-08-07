@@ -80,11 +80,7 @@ def subset_recordings(recordings_batch, sensor_indices, description):
     B = recordings_batch.shape[0]
     assert_eq(
         recordings_batch.shape,
-        (
-            B,
-            description.sensor_count,
-            description.output_length,
-        ),
+        (B, description.sensor_count, description.output_length,),
     )
     return recordings_batch[:, sensor_indices]
 
@@ -137,10 +133,7 @@ def all_grid_locations(device, description):
     xmin_location = (minimum_x_units - description.emitter_indices[0]) * description.dx
     x_steps = description.Nx - minimum_x_units
     x_ls = torch.linspace(
-        start=xmin_location,
-        end=description.xmax,
-        steps=x_steps,
-        device=device,
+        start=xmin_location, end=description.xmax, steps=x_steps, device=device,
     )
     y_ls = torch.linspace(
         start=description.ymin,
@@ -267,26 +260,14 @@ def sample_obstacle_map(obstacle_map_batch, locations_xyz_batch, description):
     assert isinstance(description, SimulationDescription)
     B = obstacle_map_batch.shape[0]
     assert_eq(
-        obstacle_map_batch.shape,
-        (
-            B,
-            description.Nx,
-            description.Ny,
-            description.Nz,
-        ),
+        obstacle_map_batch.shape, (B, description.Nx, description.Ny, description.Nz,),
     )
     obstacle_map_batch = obstacle_map_batch.unsqueeze(1).to(torch.float32)
 
     # for grid_sample: batch, features, input depth, input height, input width
     assert_eq(
         obstacle_map_batch.shape,
-        (
-            B,
-            1,
-            description.Nx,
-            description.Ny,
-            description.Nz,
-        ),
+        (B, 1, description.Nx, description.Ny, description.Nz,),
     )
 
     N = locations_xyz_batch.shape[1]
@@ -544,13 +525,7 @@ def time_of_flight_crop(
     B2 = sample_locations.shape[1]
     recordings = recordings.unsqueeze(1).repeat(1, B2, 1, 1)
     assert_eq(
-        recordings.shape,
-        (
-            B1,
-            B2,
-            num_receivers,
-            recording_length_samples,
-        ),
+        recordings.shape, (B1, B2, num_receivers, recording_length_samples,),
     )
 
     # Validate emitter location
@@ -561,11 +536,7 @@ def time_of_flight_crop(
     # Validate receiver locations
     assert_eq(receiver_locations.dtype, torch.float32)
     assert_eq(
-        receiver_locations.shape,
-        (
-            num_receivers,
-            3,
-        ),
+        receiver_locations.shape, (num_receivers, 3,),
     )
     receiver_locations = receiver_locations.reshape(1, 1, num_receivers, 3)
 
@@ -616,8 +587,7 @@ def time_of_flight_crop(
 
     # for grid_sample: batch, height, width, 2
     assert_eq(
-        crop_grid.shape,
-        ((B1 * B2 * num_receivers), crop_length_samples, 1, 2),
+        crop_grid.shape, ((B1 * B2 * num_receivers), crop_length_samples, 1, 2),
     )
 
     # For grid_sample: batch, features, height, width
@@ -679,12 +649,7 @@ def make_positive_distance_field(obstacle_map, description):
     num_iters = max(description.Nx, description.Ny, description.Nz) // kernel_radius
     for current_iter in range(num_iters):
         # pad with inf on each spatial axis
-        pdf_padded = F.pad(
-            pdf,
-            pad=pad_sizes,
-            mode="constant",
-            value=np.inf,
-        )
+        pdf_padded = F.pad(pdf, pad=pad_sizes, mode="constant", value=np.inf,)
         assert_eq(
             pdf_padded.shape,
             (
@@ -887,13 +852,7 @@ def _simulation_boundary_sdf(description, sample_locations, radius):
     )
     sdf_z_axes = torch.norm(z_axes_locations, dim=0) - radius
 
-    return torch.minimum(
-        torch.minimum(
-            sdf_x_axes,
-            sdf_y_axes,
-        ),
-        sdf_z_axes,
-    )
+    return torch.minimum(torch.minimum(sdf_x_axes, sdf_y_axes,), sdf_z_axes,)
 
 
 def _raymarch_sdf_impl(

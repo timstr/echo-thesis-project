@@ -59,7 +59,8 @@ class H5DS:
         ds = h5file[self.name]
         if self.extensible:
             assert isinstance(index, int)
-            assert index < ds.shape[0]
+            if index < 0 or index >= ds.shape[0]:
+                raise StopIteration()
             if self.shape == (1,):
                 return ds[index, 0]
             return np.array(ds[index])
@@ -84,7 +85,8 @@ class H5DS:
         ds = h5file[self.name]
         if self.extensible:
             assert isinstance(index, int)
-            assert index < ds.shape[0]
+            if index < 0 or index >= ds.shape[0]:
+                raise StopIteration()
             ds[index] = value
         else:
             assert index is None

@@ -1,3 +1,4 @@
+from tof_utils import obstacle_map_to_sdf
 import fix_dead_command_line
 
 import h5py
@@ -20,6 +21,8 @@ from utils import assert_eq
 
 
 def middle_is_empty(obstacles):
+    if isinstance(obstacles, np.ndarray):
+        obstacles = torch.tensor(obstacles)
     assert isinstance(obstacles, torch.Tensor)
     assert_eq(obstacles.shape, (Nx, Ny, Nz))
     assert_eq(obstacles.dtype, torch.bool)
@@ -33,6 +36,8 @@ def middle_is_empty(obstacles):
 
 
 def outside_is_empty(obstacles):
+    if isinstance(obstacles, np.ndarray):
+        obstacles = torch.tensor(obstacles)
     assert isinstance(obstacles, torch.Tensor)
     assert_eq(obstacles.shape, (Nx, Ny, Nz))
     assert_eq(obstacles.dtype, torch.bool)
@@ -142,23 +147,25 @@ def main():
                 "Please set the ECHO4CH_OBSTACLES environment variable to point to the ECHO4CH obstacles HDF5 file"
             )
 
-        obstacles_h5file = h5py.File(echo4ch_obstacle_path, "r")
-        obstacle_ds = H5DS(
-            name="obstacles", dtype=np.bool8, shape=(64, 64, 64), extensible=True
-        )
-        assert obstacle_ds.exists(obstacles_h5file)
-
         def obstacle_generator():
-            i = 0
-            N = obstacle_ds.count(obstacles_h5file)
-            if count is not None:
-                N = min(count, N)
-            while i < N:
-                e = obstacle_ds.read(obstacles_h5file, index=i)
-                o = np.zeros((desc.Nx, desc.Ny, desc.Nz), dtype=np.bool8)
-                o[-64:, :, :] = e[:, 2:-2, 2:-2]
-                yield o, f"ECHO4CH obstacle {i}"
-                i += 1
+            with h5py.file(echo4ch_obstacle_path, "r") as obstacles_h5file:
+                obstacles_ds = H5DS(
+                    name="obstacles",
+                    dtype=np.bool8,
+                    shape=(64, 64, 64),
+                    extensible=True,
+                )
+                assert obstacles_ds.exists(obstacles_h5file)
+                i = 0
+                N = obstacle_ds.count(obstacles_h5file)
+                if count is not None:
+                    N = min(count, N)
+                while i < N:
+                    e = obstacle_ds.read(obstacles_h5file, index=i)
+                    o = np.zeros((desc.Nx, desc.Ny, desc.Nz), dtype=np.bool8)
+                    o[-64:, :, :] = e[:, 2:-2, 2:-2]
+                    yield o, f"ECHO4CH obstacle {i}"
+                    i += 1
 
     else:
         raise Exception(f'Unrecognized dataset mode: "{mode}"')
@@ -175,11 +182,19 @@ def main():
         except StopIteration:
             pass
 
-    dataset = WaveDataset3d(desc, dataset_path, write=True)
+    if os.path.exists(dataset_path):
+        print(
+            f"Error: attempted to create a dataset file at {dataset_path} but it already exists"
+        )
+        exit(-1)
 
     for i, (o, s) in enumerate(obstacles_subset()):
         print(f'{i} - Creating dataset example "{s}"')
-        dataset.simulate_and_append_to_dataset(o)
+        desc.set_obstacles(o)
+        results = desc.run()
+        sdf = obstacle_map_to_sdf(torch.tensor(o).cuda(), desc).cpu().numpy()
+        with WaveDataset3d(desc, dataset_path, write=True) as dataset:
+            dataset.append_to_dataset(obstacles=o, recordings=results, sdf=sdf)
 
 
 if __name__ == "__main__":

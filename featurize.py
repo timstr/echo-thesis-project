@@ -370,11 +370,7 @@ def make_image_pred(example, img_size, network, num_splits, predict_variance):
     assert (num_samples % num_splits) == 0
     split_size = num_samples // num_splits
     xy_locations = all_yx_locations(img_size).permute(1, 0).unsqueeze(0)
-    d = DeviceDict(
-        {
-            "input": example["input"][:1],
-        }
-    )
+    d = DeviceDict({"input": example["input"][:1],})
     for i in range(num_splits):
         begin = i * split_size
         end = (i + 1) * split_size
@@ -394,11 +390,7 @@ def make_volume_pred(example, img_size, network, num_splits, predict_variance):
     assert (num_samples % num_splits) == 0
     split_size = num_samples // num_splits
     xyz_locations = all_zyx_locations(img_size).permute(1, 0).unsqueeze(0)
-    d = DeviceDict(
-        {
-            "input": example["input"][:1],
-        }
-    )
+    d = DeviceDict({"input": example["input"][:1],})
     for i in range(num_splits):
         begin = i * split_size
         end = (i + 1) * split_size
@@ -631,11 +623,7 @@ def make_dense_tof_cropped_output_pred(example, network, output_config):
     assert len(input_batch_of_one.shape) == 3
     assert input_batch_of_one.shape[2] == wavesim_duration
 
-    d = DeviceDict(
-        {
-            "input": input_batch_of_one.repeat(split_size, 1, 1),
-        }
-    )
+    d = DeviceDict({"input": input_batch_of_one.repeat(split_size, 1, 1),})
 
     for i in range(num_splits):
         begin = i * split_size

@@ -53,21 +53,13 @@ class WaveDataset3d(torch.utils.data.Dataset):
         self.obstacles = H5DS(
             name="obstacles",
             dtype=np.bool8,
-            shape=(
-                description.Nx,
-                description.Ny,
-                description.Nz,
-            ),
+            shape=(description.Nx, description.Ny, description.Nz,),
             extensible=True,
         )
         self.signed_distance_fields = H5DS(
             name="signed_distance_fields",
             dtype=np.float32,
-            shape=(
-                description.Nx,
-                description.Ny,
-                description.Nz,
-            ),
+            shape=(description.Nx, description.Ny, description.Nz,),
             extensible=True,
         )
 
@@ -75,6 +67,16 @@ class WaveDataset3d(torch.utils.data.Dataset):
             self._create_empty_dataset()
 
         self.validate()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.h5file.close()
+        return False
+
+    def close(self):
+        self.h5file.close()
 
     def _create_empty_dataset(self):
         assert self.write, "The dataset must be opened with write=True"
@@ -130,8 +132,7 @@ class WaveDataset3d(torch.utils.data.Dataset):
         assert_eq(self.sensor_count.read(self.h5file), self.description.sensor_count)
 
         assert_eq(
-            self.sensor_indices.read(self.h5file),
-            self.description.sensor_indices,
+            self.sensor_indices.read(self.h5file), self.description.sensor_indices,
         )
         assert_eq(
             self.emitter_location.read(self.h5file), self.description.emitter_indices
@@ -145,25 +146,14 @@ class WaveDataset3d(torch.utils.data.Dataset):
             self.sensor_recordings.count(self.h5file), self.obstacles.count(self.h5file)
         )
 
-    def simulate_and_append_to_dataset(self, obstacles):
-        assert self.write, "The dataset must be opened with write=True"
-        assert self.h5file, "The file must be open"
-        self.description.set_obstacles(obstacles)
-        results = self.description.run()
-        self.append_to_dataset(obstacles, results)
-
-    def append_to_dataset(self, obstacles, recordings, sdf=None):
+    def append_to_dataset(self, obstacles, recordings, sdf):
         assert self.write, "The dataset must be opened with write=True"
         assert self.h5file, "The file must be open"
         assert isinstance(obstacles, np.ndarray) or isinstance(obstacles, torch.Tensor)
         assert obstacles.dtype in [np.bool8, torch.bool]
         assert_eq(
             obstacles.shape,
-            (
-                self.description.Nx,
-                self.description.Ny,
-                self.description.Nz,
-            ),
+            (self.description.Nx, self.description.Ny, self.description.Nz,),
         )
         assert isinstance(recordings, np.ndarray) or isinstance(
             recordings, torch.Tensor
@@ -173,15 +163,6 @@ class WaveDataset3d(torch.utils.data.Dataset):
             recordings.shape,
             (self.description.sensor_count, self.description.output_length),
         )
-
-        if sdf is None:
-            # print("Computing signed distance field...")
-            sdf = (
-                obstacle_map_to_sdf(torch.tensor(obstacles).cuda(), self.description)
-                .cpu()
-                .numpy()
-            )
-            # print("Computing signed distance field... done.")
 
         assert isinstance(sdf, np.ndarray) or isinstance(sdf, torch.Tensor)
         assert sdf.dtype in [np.float32, torch.float32]
