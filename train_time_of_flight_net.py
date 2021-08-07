@@ -19,6 +19,7 @@ from time_of_flight_net import TimeOfFlightNet
 from tof_utils import (
     SplitSize,
     all_grid_locations,
+    colourize_sdf,
     evaluate_prediction,
     make_random_training_locations,
     make_receiver_indices,
@@ -366,12 +367,14 @@ def main():
                             batch_gpu["sdf"][0],
                             description,
                             locations=locations[0].to(the_device),
+                            colour_function=colourize_sdf,
                         )
                         ax_sdf_gt_val.title.set_text("Ground Truth SDF (validation)")
                         plot_ground_truth(
                             ax_sdf_gt_val,
                             val_batch_gpu["sdf"][0],
                             description,
+                            colour_function=colourize_sdf,
                         )
 
                         # plot the predicted sdf
@@ -383,6 +386,7 @@ def main():
                             model,
                             batch_gpu["sensor_recordings"][0, sensor_indices],
                             description,
+                            colour_function=colourize_sdf,
                         )
                         ax_sdf_pred_val.title.set_text("Predicted SDF (validation)")
                         split_till_it_fits(
@@ -392,6 +396,7 @@ def main():
                             model,
                             val_batch_gpu["sensor_recordings"][0, sensor_indices],
                             description,
+                            colour_function=colourize_sdf,
                         )
 
                         if args.raymarch:

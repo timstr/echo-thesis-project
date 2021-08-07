@@ -320,8 +320,15 @@ def sample_obstacle_map(obstacle_map_batch, locations_xyz_batch, description):
     return values.reshape(B, N)
 
 
-def _plot_sdf_slices(
-    plt_axis, model, recordings, obstacle_map, description, num_splits, locations=None
+def _plot_volumetric_slices(
+    plt_axis,
+    model,
+    recordings,
+    obstacle_map,
+    description,
+    num_splits,
+    colour_function,
+    locations=None,
 ):
     with torch.no_grad():
         assert model is None or isinstance(model, nn.Module)
@@ -375,7 +382,7 @@ def _plot_sdf_slices(
             assert_eq(prediction.shape, (description.Nx * description.Ny,))
             prediction = prediction.reshape(description.Nx, description.Ny)
 
-            prediction = colourize_sdf(prediction)
+            prediction = colour_function(prediction)
             assert_eq(prediction.shape, (3, description.Nx, description.Ny))
 
             prediction = prediction.cpu()
@@ -413,8 +420,10 @@ def _plot_sdf_slices(
         plt_axis.axis("off")
 
 
-def plot_ground_truth(plt_axis, obstacle_map, description, locations=None):
-    _plot_sdf_slices(
+def plot_ground_truth(
+    plt_axis, obstacle_map, description, colour_function, locations=None
+):
+    _plot_volumetric_slices(
         plt_axis=plt_axis,
         model=None,
         recordings=None,
@@ -422,6 +431,7 @@ def plot_ground_truth(plt_axis, obstacle_map, description, locations=None):
         description=description,
         num_splits=1,
         locations=locations,
+        colour_function=colour_function,
     )
 
 
@@ -449,8 +459,10 @@ def split_network_prediction(model, locations, recordings, description, num_spli
     return prediction
 
 
-def plot_prediction(plt_axis, model, recordings, description, num_splits):
-    _plot_sdf_slices(
+def plot_prediction(
+    plt_axis, model, recordings, description, colour_function, num_splits
+):
+    _plot_volumetric_slices(
         plt_axis=plt_axis,
         model=model,
         recordings=recordings,
@@ -458,6 +470,7 @@ def plot_prediction(plt_axis, model, recordings, description, num_splits):
         description=description,
         num_splits=num_splits,
         locations=None,
+        colour_function=colour_function,
     )
 
 
