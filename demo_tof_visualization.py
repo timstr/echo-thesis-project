@@ -150,6 +150,8 @@ def main():
     # 46 - single large circle, kinda close
     example = dataset[46]
 
+    # TODO: add fm chirp
+
     recordings = example["sensor_recordings"][sensor_indices].to(the_device)
 
     canonical_echo = recordings[0, : args.tofcropsize]

@@ -1,5 +1,6 @@
 import fix_dead_command_line
 
+import math
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
@@ -20,6 +21,8 @@ from tof_utils import (
     SplitSize,
     all_grid_locations,
     colourize_sdf,
+    make_fm_chirp,
+    convolve_recordings,
     evaluate_prediction,
     make_random_training_locations,
     make_receiver_indices,
@@ -33,7 +36,10 @@ from tof_utils import (
     vector_normalize,
 )
 from utils import progress_bar
-from current_simulation_description import make_simulation_description, minimum_x_units
+from current_simulation_description import (
+    make_simulation_description,
+    minimum_x_units,
+)
 from plot_utils import LossPlotter, plt_screenshot
 from torch.utils.data._utils.collate import default_collate
 
@@ -133,6 +139,23 @@ def main():
         collate_fn=collate_fn_device,
     )
 
+    # NOTE: "maximum supported frequency: 17.15kHz" according to
+    # the matlab version of k-wave for a similar setup
+    fm_chirp = (
+        torch.tensor(
+            make_fm_chirp(
+                begin_frequency_Hz=1_000.0,  # 1 kHz
+                end_frequency_Hz=16_000.0,  # 16 kHz
+                sampling_frequency=description.output_sampling_frequency,
+                chirp_length_samples=math.ceil(
+                    0.001 * description.output_sampling_frequency
+                ),  # 1 ms
+            )
+        )
+        .float()
+        .to(the_device)
+    )
+
     model = TimeOfFlightNet(
         speed_of_sound=description.air_properties.speed_of_sound,
         sampling_frequency=description.output_sampling_frequency,
@@ -146,20 +169,25 @@ def main():
 
     def compute_validation_metrics():
         with torch.no_grad():
-            print("Computing validation metrics")
+            validation_begin_time = datetime.datetime.now()
+            print("Computing validation metrics...")
             total_metrics = {}
             locations = all_grid_locations(the_device, description)
             N = len(val_set)
             for i, dd in enumerate(val_set):
                 sdf_gt = dd["sdf"][minimum_x_units:].to(the_device)
-                recordings = dd["sensor_recordings"][sensor_indices].to(the_device)
+                recordings_ir = dd["sensor_recordings"][sensor_indices].to(the_device)
+
+                recordings_fm = convolve_recordings(
+                    fm_chirp, recordings_ir, description
+                )
 
                 sdf_pred = split_till_it_fits(
                     split_network_prediction,
                     validation_splits,
                     model=model,
                     locations=locations,
-                    recordings=recordings,
+                    recordings=recordings_fm,
                     description=description,
                 )
                 sdf_pred = sdf_pred.reshape(
@@ -182,6 +210,12 @@ def main():
             mean_metrics = {}
             for k, v in total_metrics.items():
                 mean_metrics[k] = np.mean(v)
+
+            validation_end_time = datetime.datetime.now()
+            duration = validation_end_time - validation_begin_time
+            seconds = float(duration.seconds) + (duration.microseconds / 1_000_000.0)
+            print(f"Computing validation metrics done after {seconds} seconds.")
+
             return mean_metrics
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
@@ -190,6 +224,8 @@ def main():
         restore_module(model, args.restoremodelpath)
         restore_module(optimizer, args.restoreoptimizerpath)
 
+    timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+
     base_model_path = os.environ.get("TRAINING_MODEL_PATH")
 
     if base_model_path is None or not os.path.exists(base_model_path):
@@ -197,15 +233,13 @@ def main():
             "Please set the TRAINING_MODEL_PATH environment variable to point to the desired model directory"
         )
 
-    model_path = os.path.join(base_model_path, args.experiment)
+    model_path = os.path.join(base_model_path, f"{args.experiment}_{timestamp}")
     if os.path.exists(model_path):
         raise Exception(
             f'Error: attempted to create a folder for saving models at "{model_path}" but the folder already exists.'
         )
 
     os.makedirs(model_path)
-
-    timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
 
     log_path_root = os.environ.get("TRAINING_LOG_PATH")
 
@@ -270,9 +304,13 @@ def main():
                     batch_cpu = next(train_iter)
                     batch_gpu = batch_cpu.to(the_device)
 
-                    sensor_recordings = batch_gpu["sensor_recordings"][
+                    sensor_recordings_ir = batch_gpu["sensor_recordings"][
                         :, sensor_indices
                     ]
+
+                    sensor_recordings_fm = convolve_recordings(
+                        fm_chirp, sensor_recordings_ir, description
+                    )
 
                     sdf = batch_gpu["sdf"]
 
@@ -285,7 +323,7 @@ def main():
 
                     ground_truth = sample_obstacle_map(sdf, locations, description)
 
-                    pred_gpu = model(sensor_recordings, locations)
+                    pred_gpu = model(sensor_recordings_fm, locations)
 
                     loss = torch.nn.functional.mse_loss(ground_truth, pred_gpu)
 
@@ -308,7 +346,6 @@ def main():
                     )
 
                     if ((global_iteration + 1) % args.validationinterval) == 0:
-                        print("Computing validation loss...")
                         curr_val_metrics = compute_validation_metrics()
                         curr_val_mse = curr_val_metrics["mean_squared_error_sdf"]
                         if curr_val_mse < best_val_mse:

@@ -1,4 +1,3 @@
-from tof_utils import obstacle_map_to_sdf
 from assert_eq import assert_eq
 import h5py
 import numpy as np
@@ -53,13 +52,21 @@ class WaveDataset3d(torch.utils.data.Dataset):
         self.obstacles = H5DS(
             name="obstacles",
             dtype=np.bool8,
-            shape=(description.Nx, description.Ny, description.Nz,),
+            shape=(
+                description.Nx,
+                description.Ny,
+                description.Nz,
+            ),
             extensible=True,
         )
         self.signed_distance_fields = H5DS(
             name="signed_distance_fields",
             dtype=np.float32,
-            shape=(description.Nx, description.Ny, description.Nz,),
+            shape=(
+                description.Nx,
+                description.Ny,
+                description.Nz,
+            ),
             extensible=True,
         )
 
@@ -132,7 +139,8 @@ class WaveDataset3d(torch.utils.data.Dataset):
         assert_eq(self.sensor_count.read(self.h5file), self.description.sensor_count)
 
         assert_eq(
-            self.sensor_indices.read(self.h5file), self.description.sensor_indices,
+            self.sensor_indices.read(self.h5file),
+            self.description.sensor_indices,
         )
         assert_eq(
             self.emitter_location.read(self.h5file), self.description.emitter_indices
@@ -153,7 +161,11 @@ class WaveDataset3d(torch.utils.data.Dataset):
         assert obstacles.dtype in [np.bool8, torch.bool]
         assert_eq(
             obstacles.shape,
-            (self.description.Nx, self.description.Ny, self.description.Nz,),
+            (
+                self.description.Nx,
+                self.description.Ny,
+                self.description.Nz,
+            ),
         )
         assert isinstance(recordings, np.ndarray) or isinstance(
             recordings, torch.Tensor
