@@ -172,7 +172,10 @@ def plot_image(plt_axis, img, display_fn, output_config, checkerboard_size=8):
             sigma_curved *= 1.0 - question_marks(H, W, 18, True)
 
             mask = torch.cat(
-                (torch.zeros((N, N, 3)), sigma_curved.unsqueeze(-1),),  # RGB  # Alpha
+                (
+                    torch.zeros((N, N, 3)),  # RGB
+                    sigma_curved.unsqueeze(-1),  # alpha
+                ),
                 dim=2,
             )
             plt_axis.imshow(mask, interpolation="bicubic")
@@ -247,7 +250,9 @@ def plot_prediction_echo4ch(plt_axis, batch, network, output_config):
             assert output.shape == (output_config.num_channels, 64, 64, 64)
             output_as_minibatch = output.permute(1, 0, 2, 3)
             output_grid = torchvision.utils.make_grid(
-                output_as_minibatch[:, 0:1].repeat(1, 3, 1, 1), nrow=8, pad_value=0.25,
+                output_as_minibatch[:, 0:1].repeat(1, 3, 1, 1),
+                nrow=8,
+                pad_value=0.25,
             )[:1]
             if output_config.predict_variance:
                 output_variance_grid = torchvision.utils.make_grid(

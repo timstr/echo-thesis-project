@@ -100,7 +100,11 @@ def main():
     )
     parser.add_argument("--resolution", type=int, dest="resolution", required=True)
     parser.add_argument(
-        "--nninput", type=str, dest="nninput", choices=input_format_all, required=True,
+        "--nninput",
+        type=str,
+        dest="nninput",
+        choices=input_format_all,
+        required=True,
     )
     parser.add_argument(
         "--nnoutput",
