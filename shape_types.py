@@ -1,2 +1,0 @@
-CIRCLE = "Circle"
-RECTANGLE = "Rectangle"

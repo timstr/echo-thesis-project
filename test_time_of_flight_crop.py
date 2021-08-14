@@ -16,9 +16,9 @@ def main():
 
     desc = make_simulation_description()
 
-    dataset = WaveDataset3d(desc, "dataset_v3.h5")
+    dataset = WaveDataset3d(desc, "dataset_train.h5")
 
-    example = dataset[3]
+    example = dataset[0]
 
     obstacles = example["obstacles"]
 
@@ -102,7 +102,7 @@ def main():
             .squeeze(0)
         )
 
-        # ax_l.set_ylim(-1e-10, 1e-10)
+        ax_l.set_ylim(-2e-4, 2e-4)
         ax_l.set_xlim(0, crop_size)
 
         for j in range(desc.sensor_count):

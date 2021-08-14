@@ -1,120 +1,123 @@
-from featurize import implicit_samples_from_dense_output
-from config import (
-    EmitterConfig,
-    InputConfig,
-    OutputConfig,
-    ReceiverConfig,
-    TrainingConfig,
-)
-from config_constants import (
-    emitter_arrangement_mono,
-    emitter_format_sweep,
-    receiver_arrangement_grid,
-    input_format_spectrogram,
-    output_format_depthmap,
-    output_format_heatmap,
-)
-import compress_pickle
+import sys
 import torch
+import torchvision
 import glob
 import os
-
+import PIL.Image as Image
 from device_dict import DeviceDict
 
 
 class Echo4ChDataset(torch.utils.data.Dataset):
-    def __init__(
-        self,
-        training_config,
-        input_config,
-        output_config,
-        emitter_config,
-        receiver_config,
-    ):
-        super(Echo4ChDataset).__init__()
+    def __init__(self):
+        super(Echo4ChDataset, self).__init__()
 
-        assert isinstance(training_config, TrainingConfig)
-        assert isinstance(input_config, InputConfig)
-        assert isinstance(output_config, OutputConfig)
-        assert isinstance(emitter_config, EmitterConfig)
-        assert isinstance(receiver_config, ReceiverConfig)
-        self._training_config = training_config
-        self._input_config = input_config
-        self._output_config = output_config
-        self._emitter_config = emitter_config
-        self._receiver_config = receiver_config
+        self._rootpath = os.environ.get("ECHO4CH")
 
-        assert self._emitter_config.arrangement == emitter_arrangement_mono
-        assert self._emitter_config.format == emitter_format_sweep
+        if self._rootpath is None:
+            raise Exception(
+                "Please set the ECHO4CH environment variable to point to the ECHO4CH dataset root"
+            )
 
-        # NOTE: technically the long- and short-window spectrograms are from the same 4 receivers, but this doesn't make a difference
-        assert self._receiver_config.count == 8
-        assert self._receiver_config.arrangement == receiver_arrangement_grid
+        sys.stdout.write("Loading ECHO4CH...")
+        allfiles = glob.glob(f"{self._rootpath}/T*.png")
 
-        assert self._input_config.format == input_format_spectrogram
-        assert self._input_config.num_channels == 8
+        if len(allfiles) == 0:
+            raise Exception(
+                "The ECHO4CH environment variable points to a folder which contains no example files. Windows users: did you accidentally include quotes in the environment variable?"
+            )
 
-        assert self._output_config.format in [
-            output_format_depthmap,
-            output_format_heatmap,
+        feature_groups = {}
+
+        for filename in map(os.path.basename, allfiles):
+            terms = filename.split(".")[0].split("_")
+            shape_and_position, angle, repeat = terms[:3]
+            example_name = f"{shape_and_position}_{angle}_{repeat}"
+            feature_name = "_".join(terms[3:])
+
+            if example_name not in feature_groups:
+                feature_groups[example_name] = {}
+
+            feature_groups[example_name][feature_name] = filename
+
+        self._examples = []
+
+        required_features = [
+            "FR",
+            "FL",
+            "FU",
+            "FD",
+            "TR",
+            "TL",
+            "TU",
+            "TD",
+            "Label",
+            "Label_depthmap",
         ]
-        assert self._output_config.resolution == 64
 
-        self._rootpath = os.environ.get("ECHO4CH_DATASET")
+        for example_name, features in feature_groups.items():
+            for rf in required_features:
+                if rf not in features:
+                    continue
 
-        if self._rootpath is None or not os.path.exists(self._rootpath):
-            raise Exception(
-                "Please set the ECHO4CH_DATASET environment variable to point to the WaveSim dataset root"
-            )
+            self._examples.append(example_name)
 
-        print(
-            f'NOTE: dataset files will be loaded continuously from "{self._rootpath}", because echo4ch is just too big to fit in memory'
-        )
+        self._to_tensor = torchvision.transforms.ToTensor()
 
-        self._filenames = sorted(glob.glob("{}/example *.pkl".format(self._rootpath)))
-        num_files = len(self._filenames)
-        if num_files == 0:
-            raise Exception(
-                "The ECHO4CH_DATASET environment variable points to a folder which contains no example files. Windows users: did you accidentally include quotes in the environment variable?"
-            )
-        max_examples = self._training_config.max_examples
-        if max_examples is not None:
-            if num_files >= max_examples:
-                num_files = num_files[:max_examples]
-            else:
-                print("Warning! Fewer matching examples were found than were requested")
-                print("    Expected: ", max_examples)
-                print("    Actual:   ", num_files)
+        sys.stdout.write(" Done.\n")
 
     def __len__(self):
-        return len(self._filenames)
+        return len(self._examples)
 
     def __getitem__(self, idx):
-        path = self._filenames[idx]
-        with open(path, "rb") as file:
-            data = compress_pickle.load(file, compression="gzip")
-        spectrograms = torch.tensor(data["spectrograms"], dtype=torch.float) / 255.0
-        occupancy = torch.tensor(data["occupancy"], dtype=torch.float) / 255.0
-        depthmap = torch.tensor(data["depthmap"], dtype=torch.float) / 255.0
+        example = self._examples[idx]
+        basename = f"{self._rootpath}/{example}_"
+        spectrograms = []
+        # NOTE:
+        # F ("high Frequency resolution") == LW ("Long Window")
+        # T ("high Time resolution") == SW ("Short Window")
+        for name in ["FR", "FL", "FU", "FD", "TR", "TL", "TU", "TD"]:
+            img = Image.open(f"{basename}{name}.png")
+            assert img.size == (256, 256)
+            assert img.mode == "L"
+            tensor = self._to_tensor(img)
+            tensor = tensor.squeeze(0)
+            spectrograms.append(tensor)
 
-        dense_output = (
-            occupancy
-            if (self._output_config.format == output_format_heatmap)
-            else depthmap
+        spectrograms = torch.stack(spectrograms, dim=0)
+
+        assert spectrograms.shape == (8, 256, 256)
+        assert spectrograms.dtype == torch.float32
+
+        occupancy_unfolded = Image.open(f"{basename}Label.png")
+        # NOTE: PIL uses (width, height) convention
+        assert occupancy_unfolded.size == (64, 4096)
+        assert occupancy_unfolded.mode == "L"
+
+        occupancy_unfolded = self._to_tensor(occupancy_unfolded)
+        # Torch uses (height,width) convention
+        assert occupancy_unfolded.shape == (1, 4096, 64)
+        assert occupancy_unfolded.dtype == torch.float32
+        occupancy = occupancy_unfolded.reshape(64, 64, 64)
+
+        assert occupancy.dtype == torch.float32
+
+        depthmap = Image.open(f"{basename}Label_depthmap.png")
+        assert depthmap.size == (64, 64)
+        assert depthmap.mode == "L"
+        depthmap = self._to_tensor(depthmap)
+        assert depthmap.shape == (1, 64, 64)
+        assert depthmap.dtype == torch.float32
+        depthmap = depthmap.squeeze(0)
+
+        # Convert scalar to categorical, assuming values are either 0 or 1
+        # Channel 0: empty label
+        # Channel 1: occupied label
+        # heatmap = torch.stack((
+        #     1.0 - heatmap,
+        #     heatmap
+        # ), dim=0)
+        # assert heatmap.shape == (2, 64, 64, 64)
+
+        return DeviceDict(
+            {"spectrograms": spectrograms, "occupancy": occupancy, "depthmap": depthmap}
         )
-
-        theDict = {
-            "input": spectrograms,
-            "gt_heatmap": occupancy,
-            "gt_depthmap": depthmap,
-        }
-
-        if self._output_config.implicit:
-            spe = self._training_config.samples_per_example
-            params, values = implicit_samples_from_dense_output(dense_output, spe)
-            theDict["params"] = params
-            theDict["output"] = values
-        else:
-            theDict["output"] = dense_output
-
-        return DeviceDict(theDict)
