@@ -24,7 +24,8 @@ def make_script(tof_crop_size, z_count, xy_count):
     source activate /home/timstr/echo_env
     cd /home/timstr/echo
 
-    export WAVESIM_DATASET=/project/st-rhodin-1/users/timstr/dataset_random.h5
+    export WAVESIM_DATASET_TRAIN=/project/st-rhodin-1/users/timstr/TODO.h5
+    export WAVESIM_DATASET_VALIDATION=/project/st-rhodin-1/users/timstr/TODO.h5
     export TRAINING_LOG_PATH=/scratch/st-rhodin-1/users/timstr/echo/logs
     export TRAINING_MODEL_PATH=/scratch/st-rhodin-1/users/timstr/echo/models
     export MPLCONFIGDIR=/scratch/st-rhodin-1/users/timstr/matplotlib_junk
@@ -32,11 +33,10 @@ def make_script(tof_crop_size, z_count, xy_count):
     echo "Starting training..."
     python3 train_time_of_flight_net.py \\
         --experiment={desc} \\
-        --batchsize=32 \\
+        --batchsize=64 \\
         --iterations=1000000 \\
         --tofcropsize={tof_crop_size} \\
-        --samplesperexample=128 \\
-        --nodisplay \\
+        --samplesperexample=256 \\
         --plotinterval=4096 \\
         --validationinterval=4096 \\
         --receivercountx={xy_count} \\
@@ -50,6 +50,9 @@ def make_script(tof_crop_size, z_count, xy_count):
     with open(os.path.join(out_folder, script_name), "w", newline="\n") as f:
         f.write(contents)
 
+
+print("TODO: choose appropriate datasets")
+exit(-1)
 
 for tof_crop_size in [64, 128, 256]:
     for z_count in [1, 2, 4]:

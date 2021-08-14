@@ -11,8 +11,8 @@ from current_simulation_description import make_simulation_description
 from tof_utils import (
     SplitSize,
     make_receiver_indices,
-    plot_prediction,
-    plot_ground_truth,
+    render_slices_prediction,
+    render_slices_ground_truth,
     split_till_it_fits,
     time_of_flight_crop,
     colourize_sdf,
@@ -94,12 +94,24 @@ class SimpleTOFPredictor(nn.Module):
 
         # magnitude = torch.sum(torch.sum(recordings_cropped, dim=2), dim=2)
 
-        magnitude = torch.sum(
-            torch.sum(
-                (recordings_cropped * self.canonical_echo.reshape(1, 1, 1, L)), dim=3
-            ),
-            dim=2,
+        # magnitude = torch.sum(
+        #     torch.sum(
+        #         (recordings_cropped * self.canonical_echo.reshape(1, 1, 1, L)), dim=3
+        #     ),
+        #     dim=2,
+        # )
+
+        products = torch.sum(
+            recordings_cropped * self.canonical_echo.reshape(1, 1, 1, L),
+            dim=3,
         )
+
+        products = torch.clamp(products, min=0.0)
+
+        # threshold = 1e-5  # 0.0001
+        # products[products < threshold] = 0.0
+
+        magnitude = torch.sum(products, dim=2)
 
         assert_eq(magnitude.shape, (B1, B2))
 
@@ -109,14 +121,18 @@ class SimpleTOFPredictor(nn.Module):
 def colourize_bw_log(x):
     assert isinstance(x, torch.Tensor)
     assert len(x.shape) == 2
-    # print(f"Note: the min is {torch.min(x).item()} and the max is {torch.max(x).item()}")
-    vmin = 1e-6
-    vmax = 1e2
+    xmin = torch.min(x).item()
+    xmax = torch.max(x).item()
+    print(f"Note: the min is {xmin} and the max is {xmax}")
+    vmin = 1e-5
+    vmax = 1e-3
     logmin = math.log(vmin)
     logmax = math.log(vmax)
     linlogposx = (torch.log(torch.clamp(x, min=vmin, max=vmax)) - logmin) / (
         logmax - logmin
     )
+    if xmin >= 0.0:
+        return linlogposx.unsqueeze(0).repeat(3, 1, 1)
     linlognegx = (torch.log(torch.clamp(-x, min=vmin, max=vmax)) - logmin) / (
         logmax - logmin
     )
@@ -126,73 +142,79 @@ def colourize_bw_log(x):
 def main():
     parser = ArgumentParser()
     parser.add_argument("--tofcropsize", type=int, dest="tofcropsize", default=128)
-    parser.add_argument("--receivercountx", type=int, dest="receivercountx", default=2)
-    parser.add_argument("--receivercounty", type=int, dest="receivercounty", default=2)
-    parser.add_argument("--receivercountz", type=int, dest="receivercountz", default=2)
+    parser.add_argument("--nx", type=int, dest="nx", default=2)
+    parser.add_argument("--ny", type=int, dest="ny", default=2)
+    parser.add_argument("--nz", type=int, dest="nz", default=2)
     args = parser.parse_args()
 
     description = make_simulation_description()
-    dataset = WaveDataset3d(description, "dataset_v5.h5")
+    dataset = WaveDataset3d(description, "dataset_train.h5")
 
     sensor_indices = make_receiver_indices(
-        args.receivercountx,
-        args.receivercounty,
-        args.receivercountz,
+        args.nx,
+        args.ny,
+        args.nz,
     )
 
-    # 7 - single small circle, kinda far away
-    # 9 - single small circle, far away
-    # 24 - single small circle, close
-    # 27 - single large circle, far away
-    # 29 - single large circle, kinda far away
-    # 36 - single large circle, medium distance
-    # 43 - two small circles, medium and kinda far
-    # 46 - single large circle, kinda close
-    example = dataset[46]
+    # for i in range(49, 1000):
+    for i in [7, 9, 24, 27, 29, 36, 43, 46, 53, 61]:
+        print(i)
+        # 7 - single small circle, kinda far away
+        # 9 - single small circle, far away
+        # 24 - single small circle, close
+        # 27 - single large circle, far away
+        # 29 - single large circle, kinda far away
+        # 36 - single large circle, medium distance
+        # 43 - two small circles, medium and kinda far
+        # 46 - single large circle, kinda close
+        # 53 - lotta stuff going on
+        # 61 - near and far circles
+        example = dataset[i]
 
-    # TODO: add fm chirp
+        # TODO: add fm chirp?
 
-    recordings = example["sensor_recordings"][sensor_indices].to(the_device)
+        recordings = example["sensor_recordings"][sensor_indices].to(the_device)
 
-    canonical_echo = recordings[0, : args.tofcropsize]
+        canonical_echo = recordings[0, : args.tofcropsize]
 
-    obstacles = example["sdf"].to(the_device)
+        obstacles = example["sdf"].to(the_device)
 
-    model = SimpleTOFPredictor(
-        speed_of_sound=description.air_properties.speed_of_sound,
-        sampling_frequency=description.output_sampling_frequency,
-        recording_length_samples=description.output_length,
-        crop_length_samples=args.tofcropsize,
-        emitter_location=description.emitter_location,
-        receiver_locations=description.sensor_locations[sensor_indices],
-        canonical_echo=canonical_echo,
-    ).to(the_device)
+        model = SimpleTOFPredictor(
+            speed_of_sound=description.air_properties.speed_of_sound,
+            sampling_frequency=description.output_sampling_frequency,
+            recording_length_samples=description.output_length,
+            crop_length_samples=args.tofcropsize,
+            emitter_location=description.emitter_location,
+            receiver_locations=description.sensor_locations[sensor_indices],
+            canonical_echo=canonical_echo,
+        ).to(the_device)
 
-    plt.plot(canonical_echo.cpu())
-    plt.show()
+        splits = SplitSize("render_slices_prediction")
 
-    plot_prediction_splits = SplitSize("plot_prediction")
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4), dpi=80)
 
-    fig, axes = plt.subplots(1, 2, figsize=(4, 4), dpi=80)
+        axes[0].plot(canonical_echo.cpu())
 
-    plot_ground_truth(
-        plt_axis=axes[0],
-        obstacle_map=obstacles,
-        description=description,
-        colour_function=colourize_sdf,
-    )
+        axes[1].imshow(
+            render_slices_ground_truth(
+                obstacle_map=obstacles,
+                description=description,
+                colour_function=colourize_sdf,
+            ).permute(1, 2, 0)
+        )
 
-    split_till_it_fits(
-        plot_prediction,
-        plot_prediction_splits,
-        plt_axis=axes[1],
-        model=model,
-        recordings=recordings,
-        description=description,
-        colour_function=colourize_bw_log,
-    )
+        axes[2].imshow(
+            split_till_it_fits(
+                render_slices_prediction,
+                splits,
+                model=model,
+                recordings=recordings,
+                description=description,
+                colour_function=colourize_bw_log,
+            ).permute(1, 2, 0)
+        )
 
-    plt.show()
+        plt.show()
 
 
 if __name__ == "__main__":

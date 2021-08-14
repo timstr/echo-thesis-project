@@ -1,23 +1,10 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import math
 
 from utils import assert_eq, is_power_of_2
 from reshape_layer import Reshape
 from tof_utils import time_of_flight_crop
-
-# signed, clipped logarithm
-def sclog(t):
-    max_val = 1e0
-    min_val = 1e-5
-    signs = torch.sign(t)
-    t = torch.abs(t)
-    t = torch.clamp(t, min=min_val, max=max_val)
-    t = torch.log(t)
-    t = (t - math.log(min_val)) / (math.log(max_val) - math.log(min_val))
-    t = t * signs
-    return t
 
 
 class TimeOfFlightNet(nn.Module):
@@ -64,7 +51,8 @@ class TimeOfFlightNet(nn.Module):
         )
         assert receiver_locations_tensor.shape == (num_receivers, 3)
         self.receiver_locations = nn.parameter.Parameter(
-            data=receiver_locations_tensor, requires_grad=False,
+            data=receiver_locations_tensor,
+            requires_grad=False,
         )
 
         # Simple 2-layer fully-connected model
@@ -86,33 +74,35 @@ class TimeOfFlightNet(nn.Module):
         conv_features = 128
         final_length = crop_length_samples // 8
         final_features = 32
+        conv_kernel_size = 31
+        conv_padding = (conv_kernel_size - 1) // 2
 
         self.model = nn.Sequential(
             nn.BatchNorm1d(num_features=num_receivers),
             nn.Conv1d(
                 in_channels=num_receivers,
                 out_channels=conv_features,
-                kernel_size=15,
+                kernel_size=conv_kernel_size,
                 stride=2,
-                padding=7,
+                padding=conv_padding,
             ),
             nn.ReLU(),
             nn.BatchNorm1d(num_features=conv_features),
             nn.Conv1d(
                 in_channels=conv_features,
                 out_channels=conv_features,
-                kernel_size=15,
+                kernel_size=conv_kernel_size,
                 stride=2,
-                padding=7,
+                padding=conv_padding,
             ),
             nn.ReLU(),
             nn.BatchNorm1d(num_features=conv_features),
             nn.Conv1d(
                 in_channels=conv_features,
                 out_channels=final_features,
-                kernel_size=15,
+                kernel_size=conv_kernel_size,
                 stride=2,
-                padding=7,
+                padding=conv_padding,
             ),
             nn.ReLU(),
             Reshape((final_features, final_length), (final_features * final_length,)),
@@ -129,8 +119,6 @@ class TimeOfFlightNet(nn.Module):
             sampling_frequency=self.sampling_frequency,
             crop_length_samples=self.crop_length_samples,
         )
-
-        recordings_cropped = sclog(recordings_cropped)
 
         B1, B2 = sample_locations.shape[:2]
 

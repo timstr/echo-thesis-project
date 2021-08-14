@@ -320,8 +320,7 @@ def sample_obstacle_map(obstacle_map_batch, locations_xyz_batch, description):
     return values.reshape(B, N)
 
 
-def _plot_volumetric_slices(
-    plt_axis,
+def _render_volumetric_slices(
     model,
     recordings,
     obstacle_map,
@@ -413,18 +412,14 @@ def _plot_volumetric_slices(
 
             slices.append(prediction)
 
-        img_grid = torchvision.utils.make_grid(
-            tensor=slices, nrow=5, pad_value=0.5
-        ).permute(2, 1, 0)
-        plt_axis.imshow(img_grid)
-        plt_axis.axis("off")
+        img_grid = torchvision.utils.make_grid(tensor=slices, nrow=5, pad_value=0.5)
+        return img_grid.permute(0, 2, 1)
 
 
-def plot_ground_truth(
-    plt_axis, obstacle_map, description, colour_function, locations=None
+def render_slices_ground_truth(
+    obstacle_map, description, colour_function, locations=None
 ):
-    _plot_volumetric_slices(
-        plt_axis=plt_axis,
+    return _render_volumetric_slices(
         model=None,
         recordings=None,
         obstacle_map=obstacle_map,
@@ -459,11 +454,10 @@ def split_network_prediction(model, locations, recordings, description, num_spli
     return prediction
 
 
-def plot_prediction(
-    plt_axis, model, recordings, description, colour_function, num_splits
+def render_slices_prediction(
+    model, recordings, description, colour_function, num_splits
 ):
-    _plot_volumetric_slices(
-        plt_axis=plt_axis,
+    return _render_volumetric_slices(
         model=model,
         recordings=recordings,
         obstacle_map=None,
@@ -638,7 +632,16 @@ def time_of_flight_crop(
         B1, B2, num_receivers, crop_length_samples
     )
 
-    return recordings_cropped
+    amplitude_compensation = torch.square(distance_emitter_to_target) * torch.square(
+        distance_target_to_receivers
+    )
+    assert_eq(amplitude_compensation.shape, (B1, B2, num_receivers))
+
+    recordings_cropped_amplified = (
+        recordings_cropped * amplitude_compensation.unsqueeze(-1)
+    )
+
+    return recordings_cropped_amplified
 
 
 def make_positive_distance_field(obstacle_map, description):

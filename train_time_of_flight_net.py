@@ -2,12 +2,10 @@ import fix_dead_command_line
 
 import math
 import torch
+import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
-
-import matplotlib.pyplot as plt
-
 
 import os
 import datetime
@@ -26,14 +24,11 @@ from tof_utils import (
     evaluate_prediction,
     make_random_training_locations,
     make_receiver_indices,
-    plot_ground_truth,
-    plot_prediction,
-    raymarch_sdf_ground_truth,
-    raymarch_sdf_prediction,
+    render_slices_ground_truth,
+    render_slices_prediction,
     sample_obstacle_map,
     split_network_prediction,
     split_till_it_fits,
-    vector_normalize,
 )
 from utils import progress_bar
 from current_simulation_description import (
@@ -66,9 +61,6 @@ def main():
     )
     parser.add_argument("--nosave", dest="nosave", default=False, action="store_true")
     parser.add_argument(
-        "--nodisplay", dest="nodisplay", default=False, action="store_true"
-    )
-    parser.add_argument(
         "--raymarch", dest="raymarch", default=False, action="store_true"
     )
     parser.add_argument("--plotinterval", type=int, dest="plotinterval", default=512)
@@ -98,29 +90,33 @@ def main():
 
     print(f"Using {len(sensor_indices)} receivers in total")
 
-    dataset_path = os.environ.get("WAVESIM_DATASET")
+    k_env_dataset_train = "WAVESIM_DATASET_TRAIN"
+    k_env_dataset_val = "WAVESIM_DATASET_VALIDATION"
 
-    if dataset_path is None or not os.path.isfile(dataset_path):
+    dataset_train_path = os.environ.get(k_env_dataset_train)
+    if dataset_train_path is None or not os.path.isfile(dataset_train_path):
         raise Exception(
-            "Please set the WAVESIM_DATASET environment variable to point to the WaveSim dataset HDF5 file"
+            f"Please set the {k_env_dataset_train} environment variable to point to the WaveSim dataset HDF5 file for training"
         )
 
-    dataset = WaveDataset3d(description=description, path_to_h5file=dataset_path)
+    dataset_val_path = os.environ.get(k_env_dataset_val)
+    if dataset_val_path is None or not os.path.isfile(dataset_val_path):
+        raise Exception(
+            f"Please set the {k_env_dataset_val} environment variable to point to the WaveSim dataset HDF5 file for validation"
+        )
 
-    val_ratio = 0.1
-    val_size = int(len(dataset) * val_ratio)
-    indices_val = list(range(0, val_size))
-    indices_train = list(range(val_size, len(dataset)))
-
-    val_set = torch.utils.data.Subset(dataset, indices_val)
-    train_set = torch.utils.data.Subset(dataset, indices_train)
+    dataset_train = WaveDataset3d(
+        description=description, path_to_h5file=dataset_train_path
+    )
+    dataset_val = WaveDataset3d(
+        description=description, path_to_h5file=dataset_val_path
+    )
 
     def collate_fn_device(batch):
-        # return DeviceDict(custom_collate(batch))
         return DeviceDict(default_collate(batch))
 
     train_loader = torch.utils.data.DataLoader(
-        train_set,
+        dataset_train,
         batch_size=args.batchsize,
         num_workers=0,
         pin_memory=False,  # Note, setting pin_memory=False to avoid the pin_memory call
@@ -130,7 +126,7 @@ def main():
     )
 
     val_loader = torch.utils.data.DataLoader(
-        val_set,
+        dataset_val,
         batch_size=args.batchsize,
         num_workers=0,
         pin_memory=False,
@@ -167,14 +163,15 @@ def main():
 
     validation_splits = SplitSize("compute_validation_metrics")
 
-    def compute_validation_metrics():
+    def compute_validation_metrics(the_model):
+        assert isinstance(the_model, nn.Module)
         with torch.no_grad():
             validation_begin_time = datetime.datetime.now()
             print("Computing validation metrics...")
             total_metrics = {}
             locations = all_grid_locations(the_device, description)
-            N = len(val_set)
-            for i, dd in enumerate(val_set):
+            N = len(dataset_val)
+            for i, dd in enumerate(dataset_val):
                 sdf_gt = dd["sdf"][minimum_x_units:].to(the_device)
                 recordings_ir = dd["sensor_recordings"][sensor_indices].to(the_device)
 
@@ -185,7 +182,7 @@ def main():
                 sdf_pred = split_till_it_fits(
                     split_network_prediction,
                     validation_splits,
-                    model=model,
+                    model=the_model,
                     locations=locations,
                     recordings=recordings_fm,
                     description=description,
@@ -265,27 +262,10 @@ def main():
             ),
         )
 
+    global_iteration = 0
+
     try:
         with SummaryWriter(log_path) as writer:
-
-            if not args.nodisplay:
-                plt.ion()
-
-            num_cols = 5 if args.raymarch else 3
-
-            fig, axes = plt.subplots(2, num_cols, figsize=(22, 10), dpi=80)
-            fig.tight_layout(rect=(0.0, 0.05, 1.0, 0.95))
-
-            ax_sdf_gt_train = axes[0, 0]
-            ax_sdf_gt_val = axes[1, 0]
-            ax_sdf_pred_train = axes[0, 1]
-            ax_sdf_pred_val = axes[1, 1]
-            ax_raymarch_gt_train = axes[0, 2] if args.raymarch else None
-            ax_raymarch_gt_val = axes[1, 2] if args.raymarch else None
-            ax_raymarch_pred_train = axes[0, 3] if args.raymarch else None
-            ax_raymarch_pred_val = axes[1, 3] if args.raymarch else None
-            ax_loss_train = axes[0, 4] if args.raymarch else axes[0, 2]
-            ax_loss_val = axes[1, 4] if args.raymarch else axes[1, 2]
 
             sdf_slice_prediction_splits = SplitSize("SDF slice prediction")
 
@@ -296,7 +276,6 @@ def main():
             val_loss_y = []
             val_loss_x = []
             best_val_mse = np.inf
-            global_iteration = 0
 
             for i_epoch in range(num_epochs):
                 train_iter = iter(train_loader)
@@ -338,15 +317,19 @@ def main():
                     train_loss_plotter.append(loss)
 
                     writer.add_scalar("training loss", loss, global_iteration)
-                    # for k in loss_terms.keys():
-                    #     writer.add_scalar(k, loss_terms[k].item(), global_iteration)
 
                     progress_bar(
                         (global_iteration) % args.plotinterval, args.plotinterval
                     )
 
-                    if ((global_iteration + 1) % args.validationinterval) == 0:
-                        curr_val_metrics = compute_validation_metrics()
+                    validation_time = (
+                        ((global_iteration + 1) % args.validationinterval) == 0
+                    ) or (global_iteration == 0)
+
+                    if validation_time:
+                        model.eval()
+                        curr_val_metrics = compute_validation_metrics(model)
+                        model.train()
                         curr_val_mse = curr_val_metrics["mean_squared_error_sdf"]
                         if curr_val_mse < best_val_mse:
                             best_val_loss = curr_val_mse
@@ -364,7 +347,7 @@ def main():
 
                     time_to_plot = (
                         (global_iteration + 1) % args.plotinterval
-                    ) == 0 or (global_iteration < 2)
+                    ) == 0 or (global_iteration == 0)
 
                     if time_to_plot:
                         model.eval()
@@ -376,170 +359,55 @@ def main():
                         val_batch_cpu = next(iter(val_loader))
                         val_batch_gpu = val_batch_cpu.to(the_device)
 
-                        # clear figures for a new update
-                        ax_sdf_gt_train.cla()
-                        ax_sdf_gt_val.cla()
-                        ax_sdf_pred_train.cla()
-                        ax_sdf_pred_val.cla()
-                        if args.raymarch:
-                            ax_raymarch_gt_train.cla()
-                            ax_raymarch_gt_val.cla()
-                            ax_raymarch_pred_train.cla()
-                            ax_raymarch_pred_val.cla()
-                        ax_loss_train.cla()
-                        ax_loss_val.cla()
-
-                        # plt.gcf().suptitle(args.experiment)
-
-                        # plot the input waveforms
-                        # ax_input_train.title.set_text("Input (train)")
-                        # plot_inputs(ax_t1, batch_cpu, description)
-                        # ax_input_val.title.set_text("Input (validation)")
-                        # plot_inputs(ax_b1, val_batch_cpu, description)
-
                         # plot the ground truth obstacles
-                        ax_sdf_gt_train.title.set_text("Ground Truth SDF (train)")
-                        plot_ground_truth(
-                            ax_sdf_gt_train,
+                        slices_gt_train = render_slices_ground_truth(
                             batch_gpu["sdf"][0],
                             description,
                             locations=locations[0].to(the_device),
                             colour_function=colourize_sdf,
                         )
-                        ax_sdf_gt_val.title.set_text("Ground Truth SDF (validation)")
-                        plot_ground_truth(
-                            ax_sdf_gt_val,
+                        writer.add_image(
+                            "Ground Truth SDF (train)",
+                            slices_gt_train,
+                            global_iteration,
+                        )
+
+                        slices_gt_val = render_slices_ground_truth(
                             val_batch_gpu["sdf"][0],
                             description,
                             colour_function=colourize_sdf,
                         )
+                        writer.add_image(
+                            "Ground Truth SDF (validation)",
+                            slices_gt_val,
+                            global_iteration,
+                        )
 
                         # plot the predicted sdf
-                        ax_sdf_pred_train.title.set_text("Predicted SDF (train)")
-                        split_till_it_fits(
-                            plot_prediction,
+                        slices_pred_train = split_till_it_fits(
+                            render_slices_prediction,
                             sdf_slice_prediction_splits,
-                            ax_sdf_pred_train,
                             model,
                             batch_gpu["sensor_recordings"][0, sensor_indices],
                             description,
                             colour_function=colourize_sdf,
                         )
-                        ax_sdf_pred_val.title.set_text("Predicted SDF (validation)")
-                        split_till_it_fits(
-                            plot_prediction,
+                        writer.add_image(
+                            "Predicted SDF (train)", slices_pred_train, global_iteration
+                        )
+
+                        slices_pred_val = split_till_it_fits(
+                            render_slices_prediction,
                             sdf_slice_prediction_splits,
-                            ax_sdf_pred_val,
                             model,
                             val_batch_gpu["sensor_recordings"][0, sensor_indices],
                             description,
                             colour_function=colourize_sdf,
                         )
-
-                        if args.raymarch:
-
-                            rm_camera_center = [-0.2, -0.4, 1.0]
-                            rm_camera_up = vector_normalize([-0.2, 1.0, 0.2], norm=0.5)
-                            rm_camera_right = vector_normalize(
-                                [1.0, 0.0, 1.0], norm=1.0
-                            )
-                            rm_x_resolution = 256
-                            rm_y_resolution = 128
-
-                            ax_raymarch_gt_train.title.set_text(
-                                "Ground Truth Raymarch (train)"
-                            )
-                            print("Raymarching ground truth (train)")
-                            ax_raymarch_gt_train.imshow(
-                                raymarch_sdf_ground_truth(
-                                    camera_center_xyz=rm_camera_center,
-                                    camera_up_xyz=rm_camera_up,
-                                    camera_right_xyz=rm_camera_right,
-                                    x_resolution=rm_x_resolution,
-                                    y_resolution=rm_y_resolution,
-                                    description=description,
-                                    obstacle_sdf=batch_gpu["sdf"][0],
-                                )
-                                .cpu()
-                                .permute(2, 1, 0)
-                            )
-
-                            ax_raymarch_gt_val.title.set_text(
-                                "Ground Truth Raymarch (validation)"
-                            )
-                            print("Raymarching ground truth (validation)")
-                            ax_raymarch_gt_val.imshow(
-                                raymarch_sdf_ground_truth(
-                                    camera_center_xyz=rm_camera_center,
-                                    camera_up_xyz=rm_camera_up,
-                                    camera_right_xyz=rm_camera_right,
-                                    x_resolution=rm_x_resolution,
-                                    y_resolution=rm_y_resolution,
-                                    description=description,
-                                    obstacle_sdf=val_batch_gpu["sdf"][0],
-                                )
-                                .cpu()
-                                .permute(2, 1, 0)
-                            )
-
-                            ax_raymarch_pred_train.title.set_text(
-                                "Predicted Raymarch (train)"
-                            )
-                            print("Raymarching prediction (train)")
-                            ax_raymarch_pred_train.imshow(
-                                raymarch_sdf_prediction(
-                                    camera_center_xyz=rm_camera_center,
-                                    camera_up_xyz=rm_camera_up,
-                                    camera_right_xyz=rm_camera_right,
-                                    x_resolution=rm_x_resolution,
-                                    y_resolution=rm_y_resolution,
-                                    description=description,
-                                    model=model,
-                                    recordings=batch_gpu["sensor_recordings"][
-                                        0, sensor_indices
-                                    ],
-                                )
-                                .cpu()
-                                .permute(2, 1, 0)
-                            )
-
-                            ax_raymarch_pred_val.title.set_text(
-                                "Predicted Raymarch (validation)"
-                            )
-                            print("Raymarching prediction (validation)")
-                            ax_raymarch_pred_val.imshow(
-                                raymarch_sdf_prediction(
-                                    camera_center_xyz=rm_camera_center,
-                                    camera_up_xyz=rm_camera_up,
-                                    camera_right_xyz=rm_camera_right,
-                                    x_resolution=rm_x_resolution,
-                                    y_resolution=rm_y_resolution,
-                                    description=description,
-                                    model=model,
-                                    recordings=val_batch_gpu["sensor_recordings"][
-                                        0, sensor_indices
-                                    ],
-                                )
-                                .cpu()
-                                .permute(2, 1, 0)
-                            )
-
-                        # plot the training loss on a log plot
-                        ax_loss_train.title.set_text("Training Loss")
-                        train_loss_plotter.plot_to(ax_loss_train)
-                        ax_loss_train.set_yscale("log")
-
-                        # plot the validation loss on a log plot
-                        ax_loss_val.title.set_text("Validation Loss")
-                        ax_loss_val.set_yscale("log")
-                        ax_loss_val.plot(val_loss_x, val_loss_y, c="Red")
-
-                        # Note: calling show or pause will cause a bad time
-                        fig.canvas.draw()
-                        fig.canvas.flush_events()
-
-                        plt_screenshot(fig).save(
-                            os.path.join(log_path, f"image_{global_iteration + 1}.png")
+                        writer.add_image(
+                            "Prediced SDF (validation)",
+                            slices_pred_val,
+                            global_iteration,
                         )
 
                         if (
@@ -555,8 +423,6 @@ def main():
                         save_things(global_iteration, "_latest")
 
                     global_iteration += 1
-
-        plt.close("all")
 
     except KeyboardInterrupt:
         print("\n\nControl-C detected, saving model...\n")

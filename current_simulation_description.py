@@ -77,15 +77,15 @@ def make_simulation_description():
     )
     Nt = round(Nt_at_sampling_frequency_rounded * (sampling_period / dt))
 
-    print(
-        f"{Nt_original} time steps are required to traverse the simulation twice at a time step of {dt} seconds, at a total duration of {Nt_original * dt} seconds."
-    )
-    print(
-        f"This amounts to {Nt_at_sampling_frequency} samples at {sampling_frequency} Hz, and {Nt_at_sampling_frequency_rounded} samples after rounding to the nearest power of two."
-    )
-    print(
-        f"In order to achieve this, {Nt} time steps are required at the simulation time step."
-    )
+    # print(
+    #     f"{Nt_original} time steps are required to traverse the simulation twice at a time step of {dt} seconds, at a total duration of {Nt_original * dt} seconds."
+    # )
+    # print(
+    #     f"This amounts to {Nt_at_sampling_frequency} samples at {sampling_frequency} Hz, and {Nt_at_sampling_frequency_rounded} samples after rounding to the nearest power of two."
+    # )
+    # print(
+    #     f"In order to achieve this, {Nt} time steps are required at the simulation time step."
+    # )
 
     desc = SimulationDescription(
         Nx=Nx,

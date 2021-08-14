@@ -26,9 +26,9 @@ def fancy_print(contents=None):
 
 
 def progress_bar(current, total):
-    if not sys.stdout.isatty():
-        return
     i = current + 1
+    if (not sys.stdout.isatty()) and (i < total):
+        return
     bar_fill = "=" * (i * 50 // total)
     end_of_line = "\n" if (i == total) else ""
     sys.stdout.write("\r[%-50s] %d/%d%s" % (bar_fill, i, total, end_of_line))
