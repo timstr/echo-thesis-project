@@ -1,6 +1,5 @@
 import textwrap
 import os
-from config_constants import input_format_audioraw, input_format_gcc
 
 out_folder = "job_scripts"
 
@@ -8,8 +7,8 @@ if not os.path.exists(out_folder):
     os.makedirs(out_folder)
 
 
-def make_script(tof_crop_size, z_count, xy_count):
-    desc = f"tof_c{tof_crop_size}_z{z_count}_xy{xy_count}"
+def make_script(tof_crop_size, x_count, y_count, z_count):
+    desc = f"tof_c{tof_crop_size}_x{x_count}_y{y_count}_z{z_count}"
     contents = f"""\
     #!/bin/bash
 
@@ -24,8 +23,8 @@ def make_script(tof_crop_size, z_count, xy_count):
     source activate /home/timstr/echo_env
     cd /home/timstr/echo
 
-    export WAVESIM_DATASET_TRAIN=/project/st-rhodin-1/users/timstr/TODO.h5
-    export WAVESIM_DATASET_VALIDATION=/project/st-rhodin-1/users/timstr/TODO.h5
+    export WAVESIM_DATASET_TRAIN=/project/st-rhodin-1/users/timstr/dataset_random_train.h5
+    export WAVESIM_DATASET_VALIDATION=/project/st-rhodin-1/users/timstr/dataset_random_val_small.h5
     export TRAINING_LOG_PATH=/scratch/st-rhodin-1/users/timstr/echo/logs
     export TRAINING_MODEL_PATH=/scratch/st-rhodin-1/users/timstr/echo/models
     export MPLCONFIGDIR=/scratch/st-rhodin-1/users/timstr/matplotlib_junk
@@ -33,14 +32,14 @@ def make_script(tof_crop_size, z_count, xy_count):
     echo "Starting training..."
     python3 train_time_of_flight_net.py \\
         --experiment={desc} \\
-        --batchsize=64 \\
+        --batchsize=128 \\
         --iterations=1000000 \\
         --tofcropsize={tof_crop_size} \\
         --samplesperexample=256 \\
-        --plotinterval=4096 \\
+        --plotinterval=1024 \\
         --validationinterval=4096 \\
-        --receivercountx={xy_count} \\
-        --receivercounty={xy_count} \\
+        --receivercountx={x_count} \\
+        --receivercounty={y_count} \\
         --receivercountz={z_count}
 
     echo "Training completed."
@@ -51,10 +50,13 @@ def make_script(tof_crop_size, z_count, xy_count):
         f.write(contents)
 
 
-print("TODO: choose appropriate datasets")
-exit(-1)
-
-for tof_crop_size in [64, 128, 256]:
-    for z_count in [1, 2, 4]:
-        for xy_count in [2, 4]:
-            make_script(tof_crop_size, z_count, xy_count)
+for tof_crop_size in [64, 128]:
+    for x_count in [2, 4]:
+        for y_count in [n for n in [2, 4] if n >= x_count]:
+            for z_count in [1, 2, 4]:
+                make_script(
+                    tof_crop_size=tof_crop_size,
+                    x_count=x_count,
+                    y_count=y_count,
+                    z_count=z_count,
+                )

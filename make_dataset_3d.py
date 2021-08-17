@@ -98,6 +98,7 @@ def main():
         dest="mode",
         required=True,
     )
+    parser.add_argument("--verbose", dest="verbose", default=False, action="store_true")
     args = parser.parse_args()
     numworkers = args.numworkers
     count = args.count
@@ -191,7 +192,7 @@ def main():
     for i, (o, s) in enumerate(obstacles_subset()):
         print(f'{i} - Creating dataset example "{s}"')
         desc.set_obstacles(o)
-        results = desc.run()
+        results = desc.run(verbose=args.verbose)
         sdf = obstacle_map_to_sdf(torch.tensor(o).cuda(), desc).cpu().numpy()
         with WaveDataset3d(desc, dataset_path, write=True) as dataset:
             dataset.append_to_dataset(obstacles=o, recordings=results, sdf=sdf)

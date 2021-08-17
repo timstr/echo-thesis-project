@@ -3,6 +3,7 @@ import fix_dead_command_line
 import math
 import torch
 import torch.nn as nn
+import torchvision
 from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
@@ -39,6 +40,10 @@ from plot_utils import LossPlotter, plt_screenshot
 from torch.utils.data._utils.collate import default_collate
 
 
+def concat_images(img1, img2):
+    return torchvision.utils.make_grid([img1, img2], nrow=2)
+
+
 def save_module(the_module, filename):
     print(f'Saving module to "{filename}"')
     torch.save(the_module.state_dict(), filename)
@@ -54,6 +59,7 @@ def main():
 
     parser.add_argument("--experiment", type=str, dest="experiment", required=True)
     parser.add_argument("--batchsize", type=int, dest="batchsize", default=4)
+    parser.add_argument("--learningrate", type=float, dest="learningrate", default=1e-3)
     parser.add_argument("--iterations", type=int, dest="iterations", default=None)
     parser.add_argument("--tofcropsize", type=int, dest="tofcropsize", default=128)
     parser.add_argument(
@@ -127,7 +133,7 @@ def main():
 
     val_loader = torch.utils.data.DataLoader(
         dataset_val,
-        batch_size=args.batchsize,
+        batch_size=1,  # NOTE: batch size is 1 because this is only used for plotting
         num_workers=0,
         pin_memory=False,
         shuffle=True,
@@ -140,26 +146,18 @@ def main():
     fm_chirp = (
         torch.tensor(
             make_fm_chirp(
-                begin_frequency_Hz=1_000.0,  # 1 kHz
-                end_frequency_Hz=16_000.0,  # 16 kHz
+                begin_frequency_Hz=1_000.0,
+                end_frequency_Hz=10_000.0,
                 sampling_frequency=description.output_sampling_frequency,
                 chirp_length_samples=math.ceil(
                     0.001 * description.output_sampling_frequency
-                ),  # 1 ms
+                ),
+                wave="sine",
             )
         )
         .float()
         .to(the_device)
     )
-
-    model = TimeOfFlightNet(
-        speed_of_sound=description.air_properties.speed_of_sound,
-        sampling_frequency=description.output_sampling_frequency,
-        recording_length_samples=description.output_length,
-        crop_length_samples=args.tofcropsize,
-        emitter_location=description.emitter_location,
-        receiver_locations=description.sensor_locations[sensor_indices],
-    ).to(the_device)
 
     validation_splits = SplitSize("compute_validation_metrics")
 
@@ -215,7 +213,16 @@ def main():
 
             return mean_metrics
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    model = TimeOfFlightNet(
+        speed_of_sound=description.air_properties.speed_of_sound,
+        sampling_frequency=description.output_sampling_frequency,
+        recording_length_samples=description.output_length,
+        crop_length_samples=args.tofcropsize,
+        emitter_location=description.emitter_location,
+        receiver_locations=description.sensor_locations[sensor_indices],
+    ).to(the_device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.learningrate)
 
     if args.restoremodelpath is not None:
         restore_module(model, args.restoremodelpath)
@@ -360,31 +367,13 @@ def main():
                         val_batch_gpu = val_batch_cpu.to(the_device)
 
                         # plot the ground truth obstacles
-                        slices_gt_train = render_slices_ground_truth(
+                        slices_train_gt = render_slices_ground_truth(
                             batch_gpu["sdf"][0],
                             description,
                             locations=locations[0].to(the_device),
                             colour_function=colourize_sdf,
                         )
-                        writer.add_image(
-                            "Ground Truth SDF (train)",
-                            slices_gt_train,
-                            global_iteration,
-                        )
-
-                        slices_gt_val = render_slices_ground_truth(
-                            val_batch_gpu["sdf"][0],
-                            description,
-                            colour_function=colourize_sdf,
-                        )
-                        writer.add_image(
-                            "Ground Truth SDF (validation)",
-                            slices_gt_val,
-                            global_iteration,
-                        )
-
-                        # plot the predicted sdf
-                        slices_pred_train = split_till_it_fits(
+                        slices_train_pred = split_till_it_fits(
                             render_slices_prediction,
                             sdf_slice_prediction_splits,
                             model,
@@ -392,11 +381,20 @@ def main():
                             description,
                             colour_function=colourize_sdf,
                         )
+                        slices_train = concat_images(slices_train_gt, slices_train_pred)
+
                         writer.add_image(
-                            "Predicted SDF (train)", slices_pred_train, global_iteration
+                            "SDF Ground Truth, SDF Prediction (train)",
+                            slices_train,
+                            global_iteration,
                         )
 
-                        slices_pred_val = split_till_it_fits(
+                        slices_val_gt = render_slices_ground_truth(
+                            val_batch_gpu["sdf"][0],
+                            description,
+                            colour_function=colourize_sdf,
+                        )
+                        slices_val_pred = split_till_it_fits(
                             render_slices_prediction,
                             sdf_slice_prediction_splits,
                             model,
@@ -404,9 +402,10 @@ def main():
                             description,
                             colour_function=colourize_sdf,
                         )
+                        slices_val = concat_images(slices_val_gt, slices_val_pred)
                         writer.add_image(
-                            "Prediced SDF (validation)",
-                            slices_pred_val,
+                            "SDF Ground Truth, SDF Prediction (validation)",
+                            slices_val,
                             global_iteration,
                         )
 

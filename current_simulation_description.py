@@ -2,12 +2,16 @@ import math
 import random
 
 from simulation_description import AcousticMediumProperties, SimulationDescription
-from kwave_util import make_ball
+from kwave_util import make_ball, make_box
 
-Nx = 180
-Ny = 60
-Nz = 60
-minimum_x_units = 60
+Npml = 10  # spatial count
+
+Nx = 256 - 2 * Npml
+Ny = 128 - 2 * Npml
+Nz = 128 - 2 * Npml
+minimum_x_units = Nx - 128 - 64
+
+spatial_resolution = 0.005  # meters
 
 sensor_count_x = 4
 sensor_count_y = 4
@@ -57,9 +61,7 @@ def make_simulation_description():
         # density=rho_wood,  # kilograms per cubic meter
     )
 
-    spatial_resolution = 1e-2  # meters
-    Npml = 10  # spatial count
-    dt = 1e-7  # seconds
+    dt = 2e-7  # seconds
     # dt = 1e-6  # seconds
 
     sampling_frequency = 96_000.0
@@ -76,6 +78,10 @@ def make_simulation_description():
         math.ceil(math.log2(Nt_at_sampling_frequency))
     )
     Nt = round(Nt_at_sampling_frequency_rounded * (sampling_period / dt))
+
+    # # HACK
+    # print("HACK: reduced timesteps for testing")
+    # Nt = Nt // 10
 
     # print(
     #     f"{Nt_original} time steps are required to traverse the simulation twice at a time step of {dt} seconds, at a total duration of {Nt_original * dt} seconds."
@@ -107,13 +113,31 @@ def make_simulation_description():
     return desc
 
 
+SHAPE_TYPE_SPHERE = "sphere"
+SHAPE_TYPE_BOX = "box"
+
+
 def make_random_obstacle_single(description):
     assert isinstance(description, SimulationDescription)
-    r = random.randrange(1, 10)
-    x = random.randrange(minimum_x_units + r, Nx - r)
-    y = random.randrange(r, Ny - r)
-    z = random.randrange(r, Nz - r)
-    return make_ball(Nx, Ny, Nz, x, y, z, r)
+    min_radius = math.ceil(0.001 / spatial_resolution)
+    max_radius = math.ceil(0.010 / spatial_resolution)
+    shape_type = random.choice([SHAPE_TYPE_SPHERE, SHAPE_TYPE_BOX])
+    if shape_type == SHAPE_TYPE_SPHERE:
+        r = random.randrange(min_radius, max_radius)
+        x = random.randrange(minimum_x_units + r, Nx - r)
+        y = random.randrange(r, Ny - r)
+        z = random.randrange(r, Nz - r)
+        return make_ball(Nx, Ny, Nz, x, y, z, r)
+    elif shape_type == SHAPE_TYPE_BOX:
+        rx = random.randrange(min_radius, max_radius)
+        ry = random.randrange(min_radius, max_radius)
+        rz = random.randrange(min_radius, max_radius)
+        cx = random.randrange(minimum_x_units + rx, Nx - rx)
+        cy = random.randrange(ry, Ny - ry)
+        cz = random.randrange(rz, Nz - rz)
+        return make_box(Nx, Ny, Nz, cx, cy, cz, rx, ry, rz)
+    else:
+        raise Exception("What???")
 
 
 def make_random_obstacles(description):

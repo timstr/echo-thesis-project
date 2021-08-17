@@ -154,7 +154,9 @@ class SimulationDescription:
             emitter_indices[2],
             radius=2,
         )
+
         self.p0 = smooth(p0_raw)
+        self.p0 = p0_raw
 
         self.has_obstacles = False
 
@@ -214,6 +216,8 @@ class SimulationDescription:
                 f, "sensor_mask_index", self.sensor_indices_flat, dtype=np.uint64
             )
 
+            # HACK
+            print("HACK: reduced number of timesteps for testing")
             write_scalar_for_kwave(f, "Nt", self.Nt, dtype=np.uint64)
 
             # YES, THIS IS INTENTIONAL
@@ -265,7 +269,7 @@ class SimulationDescription:
             f.attrs["major_version"] = encode_str("1")
             f.attrs["minor_version"] = encode_str("2")
 
-    def run(self):
+    def run(self, verbose=False):
         kwave_executable = os.environ.get("KWAVE_EXECUTABLE")
 
         if kwave_executable is None or not os.path.isfile(kwave_executable):
@@ -308,14 +312,16 @@ class SimulationDescription:
                     "-o",
                     hdf5_output_file_path,
                 ],
-                capture_output=True,
+                capture_output=(not verbose),
             )
             if res.returncode != 0:
                 print("Something went wrong while trying to run kwave:")
                 print("STDERR:")
-                print(res.stderr.decode("utf-8"))
-                print("STDOUT:")
-                print(res.stdout.decode("utf-8"))
+                if res.stderr is not None:
+                    print(res.stderr.decode("utf-8"))
+                if res.stdout is not None:
+                    print("STDOUT:")
+                    print(res.stdout.decode("utf-8"))
                 exit(-1)
         except subprocess.CalledProcessError as e:
             print("Something went wrong while trying to run kwave:")
@@ -344,7 +350,7 @@ class SimulationDescription:
             # )
             sos = signal.butter(
                 N=10,
-                Wn=self.output_sampling_frequency,
+                Wn=(0.5 * self.output_sampling_frequency),
                 fs=self.simulation_sampling_frequency,
                 btype="lowpass",
                 output="sos",

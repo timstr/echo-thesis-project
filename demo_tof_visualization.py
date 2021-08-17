@@ -1,3 +1,4 @@
+from time_of_flight_net import sclog
 import fix_dead_command_line
 
 import matplotlib.pyplot as plt
@@ -5,11 +6,14 @@ import torch
 import torch.nn as nn
 import math
 import numpy as np
+import scipy.fft as fft
 
 from argparse import ArgumentParser
 from current_simulation_description import make_simulation_description
 from tof_utils import (
     SplitSize,
+    convolve_recordings,
+    make_fm_chirp,
     make_receiver_indices,
     render_slices_prediction,
     render_slices_ground_truth,
@@ -31,7 +35,6 @@ class SimpleTOFPredictor(nn.Module):
         crop_length_samples,
         emitter_location,
         receiver_locations,
-        canonical_echo,
     ):
         super(SimpleTOFPredictor, self).__init__()
 
@@ -71,10 +74,6 @@ class SimpleTOFPredictor(nn.Module):
             requires_grad=False,
         )
 
-        assert isinstance(canonical_echo, torch.Tensor)
-        assert_eq(canonical_echo.shape, (crop_length_samples,))
-        self.canonical_echo = canonical_echo
-
     def forward(self, recordings, sample_locations):
         recordings_cropped = time_of_flight_crop(
             recordings=recordings,
@@ -86,9 +85,15 @@ class SimpleTOFPredictor(nn.Module):
             crop_length_samples=self.crop_length_samples,
         )
 
+        recordings_cropped = sclog(recordings_cropped)
+
         B1, B2, R, L = recordings_cropped.shape
 
-        # magnitude = torch.sum(torch.sum(torch.square(recordings_cropped), dim=2), dim=2)
+        # magnitude = torch.sum(torch.sum(recordings_cropped, dim=2), dim=2)
+
+        magnitude = torch.mean(
+            torch.mean(torch.square(recordings_cropped), dim=2), dim=2
+        ) / (torch.mean(torch.var(recordings_cropped, dim=2), dim=2) + 1e-3)
 
         # magnitude = torch.sum(torch.square(torch.sum(recordings_cropped, dim=2)), dim=2)
 
@@ -101,17 +106,17 @@ class SimpleTOFPredictor(nn.Module):
         #     dim=2,
         # )
 
-        products = torch.sum(
-            recordings_cropped * self.canonical_echo.reshape(1, 1, 1, L),
-            dim=3,
-        )
+        # products = torch.sum(
+        #     recordings_cropped * self.canonical_echo.reshape(1, 1, 1, L),
+        #     dim=3,
+        # )
 
-        products = torch.clamp(products, min=0.0)
+        # products = torch.clamp(products, min=0.0)
 
         # threshold = 1e-5  # 0.0001
         # products[products < threshold] = 0.0
 
-        magnitude = torch.sum(products, dim=2)
+        # magnitude = torch.sum(products, dim=2)
 
         assert_eq(magnitude.shape, (B1, B2))
 
@@ -121,11 +126,11 @@ class SimpleTOFPredictor(nn.Module):
 def colourize_bw_log(x):
     assert isinstance(x, torch.Tensor)
     assert len(x.shape) == 2
-    xmin = torch.min(x).item()
-    xmax = torch.max(x).item()
-    print(f"Note: the min is {xmin} and the max is {xmax}")
-    vmin = 1e-5
-    vmax = 1e-3
+    xmin = torch.min(torch.abs(x)).item()
+    xmax = torch.max(torch.abs(x)).item()
+    print(f"Note: the abs min is {xmin} and the abs max is {xmax}")
+    vmin = 1
+    vmax = 10
     logmin = math.log(vmin)
     logmax = math.log(vmax)
     linlogposx = (torch.log(torch.clamp(x, min=vmin, max=vmax)) - logmin) / (
@@ -142,13 +147,13 @@ def colourize_bw_log(x):
 def main():
     parser = ArgumentParser()
     parser.add_argument("--tofcropsize", type=int, dest="tofcropsize", default=128)
-    parser.add_argument("--nx", type=int, dest="nx", default=2)
-    parser.add_argument("--ny", type=int, dest="ny", default=2)
-    parser.add_argument("--nz", type=int, dest="nz", default=2)
+    parser.add_argument("--nx", type=int, dest="nx", default=4)
+    parser.add_argument("--ny", type=int, dest="ny", default=4)
+    parser.add_argument("--nz", type=int, dest="nz", default=4)
     args = parser.parse_args()
 
     description = make_simulation_description()
-    dataset = WaveDataset3d(description, "dataset_train.h5")
+    dataset = WaveDataset3d(description, "dataset_no_p0_smooth.h5")
 
     sensor_indices = make_receiver_indices(
         args.nx,
@@ -156,8 +161,54 @@ def main():
         args.nz,
     )
 
-    # for i in range(49, 1000):
-    for i in [7, 9, 24, 27, 29, 36, 43, 46, 53, 61]:
+    first_recording = dataset[0]["sensor_recordings"][0]
+
+    chirp = torch.tensor(
+        make_fm_chirp(
+            begin_frequency_Hz=1_000.0,
+            end_frequency_Hz=10_000.0,
+            sampling_frequency=description.output_sampling_frequency,
+            chirp_length_samples=math.ceil(
+                0.001 * description.output_sampling_frequency
+            ),
+            wave="square",
+        )
+    ).float()
+
+    first_recording_convolved = convolve_recordings(
+        chirp, first_recording.unsqueeze(0), description
+    ).squeeze(0)
+
+    fig, axes = plt.subplots(5, 1, figsize=(8, 4), dpi=80)
+
+    axes[0].plot(first_recording)
+    axes[1].plot(
+        fft.rfftfreq(
+            description.output_length, d=(1.0 / description.output_sampling_frequency)
+        ),
+        np.abs(fft.rfft(first_recording.numpy())),
+    )
+    axes[2].plot(chirp)
+    axes[3].plot(first_recording_convolved)
+    axes[4].plot(
+        fft.rfftfreq(
+            description.output_length, d=(1.0 / description.output_sampling_frequency)
+        ),
+        np.abs(fft.rfft(first_recording_convolved.numpy())),
+    )
+
+    axes[0].set_xlim(0, description.output_length - 1)
+    axes[2].set_xlim(0, description.output_length - 1)
+    axes[3].set_xlim(0, description.output_length - 1)
+
+    plt.show()
+
+    chirp = chirp.to(the_device)
+
+    splits = SplitSize("render_slices_prediction")
+
+    for i in range(1000):
+        # for i in [7, 9, 24, 27, 29, 36, 43, 46, 53, 61]:
         print(i)
         # 7 - single small circle, kinda far away
         # 9 - single small circle, far away
@@ -173,9 +224,9 @@ def main():
 
         # TODO: add fm chirp?
 
-        recordings = example["sensor_recordings"][sensor_indices].to(the_device)
+        recordings_ir = example["sensor_recordings"][sensor_indices].to(the_device)
 
-        canonical_echo = recordings[0, : args.tofcropsize]
+        recordings_chirp = convolve_recordings(chirp, recordings_ir, description)
 
         obstacles = example["sdf"].to(the_device)
 
@@ -186,16 +237,11 @@ def main():
             crop_length_samples=args.tofcropsize,
             emitter_location=description.emitter_location,
             receiver_locations=description.sensor_locations[sensor_indices],
-            canonical_echo=canonical_echo,
         ).to(the_device)
 
-        splits = SplitSize("render_slices_prediction")
+        fig, axes = plt.subplots(1, 2, figsize=(8, 4), dpi=80)
 
-        fig, axes = plt.subplots(1, 3, figsize=(12, 4), dpi=80)
-
-        axes[0].plot(canonical_echo.cpu())
-
-        axes[1].imshow(
+        axes[0].imshow(
             render_slices_ground_truth(
                 obstacle_map=obstacles,
                 description=description,
@@ -203,12 +249,12 @@ def main():
             ).permute(1, 2, 0)
         )
 
-        axes[2].imshow(
+        axes[1].imshow(
             split_till_it_fits(
                 render_slices_prediction,
                 splits,
                 model=model,
-                recordings=recordings,
+                recordings=recordings_chirp,
                 description=description,
                 colour_function=colourize_bw_log,
             ).permute(1, 2, 0)

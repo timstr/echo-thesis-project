@@ -1,11 +1,13 @@
 import fix_dead_command_line
 
+import math
 import matplotlib.pyplot as plt
 import torch
 
 from current_simulation_description import make_simulation_description
 from dataset3d import WaveDataset3d
-from tof_utils import time_of_flight_crop
+from tof_utils import convolve_recordings, make_fm_chirp, time_of_flight_crop
+from time_of_flight_net import sclog
 
 
 def main():
@@ -31,6 +33,17 @@ def main():
         obstacles_depthmap[obstacles[:, :, z]] = z / (desc.Nz - 1)
 
     recordings = example["sensor_recordings"]
+
+    fm_chirp = torch.tensor(
+        make_fm_chirp(
+            begin_frequency_Hz=16_000.0,
+            end_frequency_Hz=0_000.0,
+            sampling_frequency=desc.output_sampling_frequency,
+            chirp_length_samples=math.ceil(0.0005 * desc.output_sampling_frequency),
+        )
+    ).float()
+
+    recordings = convolve_recordings(fm_chirp, recordings, desc)
 
     plt.ion()
 
@@ -88,7 +101,7 @@ def main():
         y_coord = (y_index - desc.emitter_indices[1]) * desc.dy
         z_coord = (z_index - desc.emitter_indices[2]) * desc.dz
 
-        audio_cropped = (
+        audio_cropped = sclog(
             time_of_flight_crop(
                 recordings=recordings.unsqueeze(0),
                 sample_locations=torch.Tensor([[[x_coord, y_coord, z_coord]]]),
@@ -102,7 +115,8 @@ def main():
             .squeeze(0)
         )
 
-        ax_l.set_ylim(-2e-4, 2e-4)
+        # ax_l.set_ylim(-5e-4, 5e-4)
+        ax_l.set_ylim(-1, 1)
         ax_l.set_xlim(0, crop_size)
 
         for j in range(desc.sensor_count):

@@ -632,16 +632,20 @@ def time_of_flight_crop(
         B1, B2, num_receivers, crop_length_samples
     )
 
-    amplitude_compensation = torch.square(distance_emitter_to_target) * torch.square(
-        distance_target_to_receivers
-    )
-    assert_eq(amplitude_compensation.shape, (B1, B2, num_receivers))
+    return recordings_cropped
 
-    recordings_cropped_amplified = (
-        recordings_cropped * amplitude_compensation.unsqueeze(-1)
-    )
+    # amplitude_compensation = (
+    #     1000.0
+    #     * torch.square(distance_emitter_to_target)
+    #     * torch.square(distance_target_to_receivers)
+    # )
+    # assert_eq(amplitude_compensation.shape, (B1, B2, num_receivers))
 
-    return recordings_cropped_amplified
+    # recordings_cropped_amplified = (
+    #     recordings_cropped * amplitude_compensation.unsqueeze(-1)
+    # )
+
+    # return recordings_cropped_amplified
 
 
 def make_positive_distance_field(obstacle_map, description):
@@ -1127,7 +1131,11 @@ def raymarch_sdf_prediction(
 
 
 def make_fm_chirp(
-    begin_frequency_Hz, end_frequency_Hz, sampling_frequency, chirp_length_samples
+    begin_frequency_Hz,
+    end_frequency_Hz,
+    sampling_frequency,
+    chirp_length_samples,
+    wave="sine",
 ):
     assert isinstance(begin_frequency_Hz, float)
     assert isinstance(end_frequency_Hz, float)
@@ -1136,6 +1144,7 @@ def make_fm_chirp(
     assert max(begin_frequency_Hz, end_frequency_Hz) <= (
         0.5 * sampling_frequency
     ), "Aliasing will occur"
+    assert wave in ["sine", "square"]
     phase = 0.0
     output = np.zeros((chirp_length_samples,))
     for i in range(chirp_length_samples):
@@ -1147,6 +1156,8 @@ def make_fm_chirp(
         phase += f / sampling_frequency
         phase -= math.floor(phase)
         output[i] = a * math.sin(phase * math.tau)
+    if wave == "square":
+        output = -1.0 + 2.0 * np.round(0.5 + 0.5 * output)
     return output
 
 
