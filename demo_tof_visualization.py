@@ -153,7 +153,7 @@ def main():
     args = parser.parse_args()
 
     description = make_simulation_description()
-    dataset = WaveDataset3d(description, "dataset_no_p0_smooth.h5")
+    dataset = WaveDataset3d(description, "dataset_half_cm_1_of_1.h5")
 
     sensor_indices = make_receiver_indices(
         args.nx,
@@ -165,13 +165,13 @@ def main():
 
     chirp = torch.tensor(
         make_fm_chirp(
-            begin_frequency_Hz=1_000.0,
-            end_frequency_Hz=10_000.0,
+            begin_frequency_Hz=32_000.0,
+            end_frequency_Hz=16_000.0,
             sampling_frequency=description.output_sampling_frequency,
             chirp_length_samples=math.ceil(
                 0.001 * description.output_sampling_frequency
             ),
-            wave="square",
+            wave="sine",
         )
     ).float()
 
@@ -181,15 +181,24 @@ def main():
 
     fig, axes = plt.subplots(5, 1, figsize=(8, 4), dpi=80)
 
+    axes[0].title.set_text("Impulse Response (Time Domain)")
     axes[0].plot(first_recording)
+
+    axes[1].title.set_text("Impulse Response (Frequency Domain)")
     axes[1].plot(
         fft.rfftfreq(
             description.output_length, d=(1.0 / description.output_sampling_frequency)
         ),
         np.abs(fft.rfft(first_recording.numpy())),
     )
+
+    axes[2].title.set_text("FM Chirp (Time Domain)")
     axes[2].plot(chirp)
+
+    axes[3].title.set_text("Combined (Time Domain)")
     axes[3].plot(first_recording_convolved)
+
+    axes[4].title.set_text("Combined (Frequency Domain)")
     axes[4].plot(
         fft.rfftfreq(
             description.output_length, d=(1.0 / description.output_sampling_frequency)

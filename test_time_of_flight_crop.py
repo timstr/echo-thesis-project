@@ -18,9 +18,10 @@ def main():
 
     desc = make_simulation_description()
 
-    dataset = WaveDataset3d(desc, "dataset_train.h5")
+    # dataset = WaveDataset3d(desc, "dataset_train.h5")
+    dataset = WaveDataset3d(desc, "dataset_half_cm_1_of_1.h5")
 
-    example = dataset[0]
+    example = dataset[1]
 
     obstacles = example["obstacles"]
 

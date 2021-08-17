@@ -119,8 +119,8 @@ SHAPE_TYPE_BOX = "box"
 
 def make_random_obstacle_single(description):
     assert isinstance(description, SimulationDescription)
-    min_radius = math.ceil(0.001 / spatial_resolution)
-    max_radius = math.ceil(0.010 / spatial_resolution)
+    min_radius = math.ceil(0.01 / spatial_resolution)
+    max_radius = math.ceil(0.10 / spatial_resolution)
     shape_type = random.choice([SHAPE_TYPE_SPHERE, SHAPE_TYPE_BOX])
     if shape_type == SHAPE_TYPE_SPHERE:
         r = random.randrange(min_radius, max_radius)
