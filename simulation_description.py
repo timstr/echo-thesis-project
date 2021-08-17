@@ -156,7 +156,6 @@ class SimulationDescription:
         )
 
         self.p0 = smooth(p0_raw)
-        self.p0 = p0_raw
 
         self.has_obstacles = False
 
@@ -216,8 +215,6 @@ class SimulationDescription:
                 f, "sensor_mask_index", self.sensor_indices_flat, dtype=np.uint64
             )
 
-            # HACK
-            print("HACK: reduced number of timesteps for testing")
             write_scalar_for_kwave(f, "Nt", self.Nt, dtype=np.uint64)
 
             # YES, THIS IS INTENTIONAL

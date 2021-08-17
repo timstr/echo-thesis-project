@@ -1,4 +1,3 @@
-from time_of_flight_net import sclog
 import fix_dead_command_line
 
 import matplotlib.pyplot as plt
@@ -24,6 +23,7 @@ from tof_utils import (
 from utils import assert_eq, is_power_of_2
 from dataset3d import WaveDataset3d
 from the_device import the_device
+from time_of_flight_net import sclog
 
 
 class SimpleTOFPredictor(nn.Module):
@@ -83,6 +83,7 @@ class SimpleTOFPredictor(nn.Module):
             speed_of_sound=self.speed_of_sound,
             sampling_frequency=self.sampling_frequency,
             crop_length_samples=self.crop_length_samples,
+            # apply_amplitude_correction=True,
         )
 
         recordings_cropped = sclog(recordings_cropped)
@@ -130,7 +131,7 @@ def colourize_bw_log(x):
     xmax = torch.max(torch.abs(x)).item()
     print(f"Note: the abs min is {xmin} and the abs max is {xmax}")
     vmin = 1
-    vmax = 10
+    vmax = 3
     logmin = math.log(vmin)
     logmax = math.log(vmax)
     linlogposx = (torch.log(torch.clamp(x, min=vmin, max=vmax)) - logmin) / (
@@ -146,7 +147,7 @@ def colourize_bw_log(x):
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument("--tofcropsize", type=int, dest="tofcropsize", default=128)
+    parser.add_argument("--tofcropsize", type=int, dest="tofcropsize", default=64)
     parser.add_argument("--nx", type=int, dest="nx", default=4)
     parser.add_argument("--ny", type=int, dest="ny", default=4)
     parser.add_argument("--nz", type=int, dest="nz", default=4)
@@ -231,11 +232,10 @@ def main():
         # 61 - near and far circles
         example = dataset[i]
 
-        # TODO: add fm chirp?
-
         recordings_ir = example["sensor_recordings"][sensor_indices].to(the_device)
 
         recordings_chirp = convolve_recordings(chirp, recordings_ir, description)
+        # recordings_chirp = recordings_ir
 
         obstacles = example["sdf"].to(the_device)
 

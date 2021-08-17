@@ -476,6 +476,7 @@ def time_of_flight_crop(
     speed_of_sound,
     sampling_frequency,
     crop_length_samples,
+    apply_amplitude_correction=False,
 ):
     """
     recordings:
@@ -513,6 +514,11 @@ def time_of_flight_crop(
     crop_length_samples
         The length in samples of the cropped audio
         int
+
+    apply_amplitude_correction
+        whether or not to increase the amplitude according the expected loss
+        in signal strength due to the two travel paths and the single reflection.
+        bool, defaults to False
     """
 
     assert isinstance(recordings, torch.Tensor)
@@ -632,20 +638,21 @@ def time_of_flight_crop(
         B1, B2, num_receivers, crop_length_samples
     )
 
+    if apply_amplitude_correction:
+        amplitude_compensation = (
+            1000.0
+            * torch.square(distance_emitter_to_target)
+            * torch.square(distance_target_to_receivers)
+        )
+        assert_eq(amplitude_compensation.shape, (B1, B2, num_receivers))
+
+        recordings_cropped_amplified = (
+            recordings_cropped * amplitude_compensation.unsqueeze(-1)
+        )
+
+        return recordings_cropped_amplified
+
     return recordings_cropped
-
-    # amplitude_compensation = (
-    #     1000.0
-    #     * torch.square(distance_emitter_to_target)
-    #     * torch.square(distance_target_to_receivers)
-    # )
-    # assert_eq(amplitude_compensation.shape, (B1, B2, num_receivers))
-
-    # recordings_cropped_amplified = (
-    #     recordings_cropped * amplitude_compensation.unsqueeze(-1)
-    # )
-
-    # return recordings_cropped_amplified
 
 
 def make_positive_distance_field(obstacle_map, description):

@@ -16,35 +16,38 @@ def main():
     # - why does grid_sample appear to be normalizing the input grid to [0, num_samples] or similar rather than [-1, 1]???
     # - Are the simulation grid indices correct? Try running a dense simulation and visualizing it. Because of the oblong shape, something will probably be out of bounds if it's wrong
 
-    desc = make_simulation_description()
+    description = make_simulation_description()
 
     # dataset = WaveDataset3d(desc, "dataset_train.h5")
-    dataset = WaveDataset3d(desc, "dataset_half_cm_1_of_1.h5")
+    dataset = WaveDataset3d(description, "dataset_half_cm_1_of_1.h5")
 
-    example = dataset[1]
+    example = dataset[2]
 
     obstacles = example["obstacles"]
 
-    z_index = desc.Nz // 2
+    z_index = description.Nz // 2
 
     # obstacles_z_slice = obstacles[:, :, z_index]
 
-    obstacles_depthmap = torch.zeros(desc.Nx, desc.Ny)
-    for z in range(desc.Nz):
-        obstacles_depthmap[obstacles[:, :, z]] = z / (desc.Nz - 1)
+    obstacles_depthmap = torch.zeros(description.Nx, description.Ny)
+    for z in range(description.Nz):
+        obstacles_depthmap[obstacles[:, :, z]] = z / (description.Nz - 1)
 
     recordings = example["sensor_recordings"]
 
     fm_chirp = torch.tensor(
         make_fm_chirp(
-            begin_frequency_Hz=16_000.0,
+            begin_frequency_Hz=32_000.0,
             end_frequency_Hz=0_000.0,
-            sampling_frequency=desc.output_sampling_frequency,
-            chirp_length_samples=math.ceil(0.0005 * desc.output_sampling_frequency),
+            sampling_frequency=description.output_sampling_frequency,
+            chirp_length_samples=math.ceil(
+                0.001 * description.output_sampling_frequency
+            ),
+            wave="sine",
         )
     ).float()
 
-    recordings = convolve_recordings(fm_chirp, recordings, desc)
+    recordings = convolve_recordings(fm_chirp, recordings, description)
 
     plt.ion()
 
@@ -56,8 +59,8 @@ def main():
     ax_l = ax[0]
     ax_r = ax[1]
 
-    x_index = desc.emitter_indices[0]
-    y_index = desc.emitter_indices[1]
+    x_index = description.emitter_indices[0]
+    y_index = description.emitter_indices[1]
 
     dragging = False
 
@@ -98,19 +101,20 @@ def main():
         ax_l.cla()
         ax_r.cla()
 
-        x_coord = (x_index - desc.emitter_indices[0]) * desc.dx
-        y_coord = (y_index - desc.emitter_indices[1]) * desc.dy
-        z_coord = (z_index - desc.emitter_indices[2]) * desc.dz
+        x_coord = (x_index - description.emitter_indices[0]) * description.dx
+        y_coord = (y_index - description.emitter_indices[1]) * description.dy
+        z_coord = (z_index - description.emitter_indices[2]) * description.dz
 
-        audio_cropped = sclog(
+        audio_cropped = (
             time_of_flight_crop(
                 recordings=recordings.unsqueeze(0),
                 sample_locations=torch.Tensor([[[x_coord, y_coord, z_coord]]]),
-                emitter_location=torch.Tensor(desc.emitter_location),
-                receiver_locations=torch.Tensor(desc.sensor_locations),
-                speed_of_sound=desc.air_properties.speed_of_sound,
-                sampling_frequency=desc.output_sampling_frequency,
+                emitter_location=torch.Tensor(description.emitter_location),
+                receiver_locations=torch.Tensor(description.sensor_locations),
+                speed_of_sound=description.air_properties.speed_of_sound,
+                sampling_frequency=description.output_sampling_frequency,
                 crop_length_samples=crop_size,
+                apply_amplitude_correction=True,
             )
             .squeeze(0)
             .squeeze(0)
@@ -120,11 +124,11 @@ def main():
         ax_l.set_ylim(-1, 1)
         ax_l.set_xlim(0, crop_size)
 
-        for j in range(desc.sensor_count):
+        for j in range(description.sensor_count):
             ax_l.plot(audio_cropped[j].detach())
 
-        ax_r.set_xlim(0, desc.Nx)
-        ax_r.set_ylim(0, desc.Ny)
+        ax_r.set_xlim(0, description.Nx)
+        ax_r.set_ylim(0, description.Ny)
         # ax_r.imshow(obstacles_z_slice.permute(1, 0))
         ax_r.imshow(obstacles_depthmap.permute(1, 0))
 
@@ -145,8 +149,16 @@ def main():
             c="red",
             linewidth=marker_thickness,
         )
-        ax_r.scatter(desc.emitter_indices[0:1], desc.emitter_indices[1:2], marker="$e$")
-        ax_r.scatter(desc.sensor_indices[:, 0], desc.sensor_indices[:, 1], marker="$r$")
+        ax_r.scatter(
+            description.emitter_indices[0:1],
+            description.emitter_indices[1:2],
+            marker="$e$",
+        )
+        ax_r.scatter(
+            description.sensor_indices[:, 0],
+            description.sensor_indices[:, 1],
+            marker="$r$",
+        )
 
         fig.canvas.draw()
         fig.canvas.flush_events()
