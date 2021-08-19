@@ -73,6 +73,9 @@ def main():
     parser.add_argument(
         "--validationinterval", type=int, dest="validationinterval", default=256
     )
+    parser.add_argument(
+        "--validationdownsampling", dest="validationdownsampling", type=int, default=1
+    )
     parser.add_argument("--receivercountx", type=int, dest="receivercountx", default=2)
     parser.add_argument("--receivercounty", type=int, dest="receivercounty", default=2)
     parser.add_argument("--receivercountz", type=int, dest="receivercountz", default=2)
@@ -146,8 +149,8 @@ def main():
     fm_chirp = (
         torch.tensor(
             make_fm_chirp(
-                begin_frequency_Hz=1_000.0,
-                end_frequency_Hz=10_000.0,
+                begin_frequency_Hz=18_000.0,
+                end_frequency_Hz=22_000.0,
                 sampling_frequency=description.output_sampling_frequency,
                 chirp_length_samples=math.ceil(
                     0.001 * description.output_sampling_frequency
@@ -159,6 +162,11 @@ def main():
         .to(the_device)
     )
 
+    # # HACK
+    # print("HACK: not using FM chirp")
+    # fm_chirp[0] = 1.0
+    # fm_chirp[1:] = 0.0
+
     validation_splits = SplitSize("compute_validation_metrics")
 
     def compute_validation_metrics(the_model):
@@ -167,10 +175,20 @@ def main():
             validation_begin_time = datetime.datetime.now()
             print("Computing validation metrics...")
             total_metrics = {}
-            locations = all_grid_locations(the_device, description)
+            locations = all_grid_locations(
+                the_device, description, downsample_factor=args.validationdownsampling
+            )
+            x_steps = (description.Nx - minimum_x_units) // args.validationdownsampling
+            y_steps = description.Ny // args.validationdownsampling
+            z_steps = description.Nz // args.validationdownsampling
             N = len(dataset_val)
             for i, dd in enumerate(dataset_val):
-                sdf_gt = dd["sdf"][minimum_x_units:].to(the_device)
+                sdf_gt = sample_obstacle_map(
+                    obstacle_map_batch=dd["sdf"].unsqueeze(0).to(the_device),
+                    locations_xyz_batch=locations.unsqueeze(0),
+                    description=description,
+                )
+                sdf_gt = sdf_gt.reshape(x_steps, y_steps, z_steps)
                 recordings_ir = dd["sensor_recordings"][sensor_indices].to(the_device)
 
                 recordings_fm = convolve_recordings(
@@ -185,13 +203,12 @@ def main():
                     recordings=recordings_fm,
                     description=description,
                 )
-                sdf_pred = sdf_pred.reshape(
-                    (description.Nx - minimum_x_units), description.Ny, description.Nz
-                )
+                sdf_pred = sdf_pred.reshape(x_steps, y_steps, z_steps)
                 metrics = evaluate_prediction(
-                    sdf_pred,
-                    sdf_gt,
-                    description,
+                    sdf_pred=sdf_pred,
+                    sdf_gt=sdf_gt,
+                    description=description,
+                    downsample_factor=args.validationdownsampling,
                 )
 
                 assert isinstance(metrics, dict)
@@ -212,6 +229,66 @@ def main():
             print(f"Computing validation metrics done after {seconds} seconds.")
 
             return mean_metrics
+
+    def plot_images(the_model):
+        val_batch_cpu = next(iter(val_loader))
+        val_batch_gpu = val_batch_cpu.to(the_device)
+
+        # plot the ground truth obstacles
+        slices_train_gt = render_slices_ground_truth(
+            batch_gpu["sdf"][0],
+            description,
+            locations=locations[0].to(the_device),
+            colour_function=colourize_sdf,
+        )
+
+        plot_recordings_train = convolve_recordings(
+            fm_chirp=fm_chirp,
+            sensor_recordings=batch_gpu["sensor_recordings"][0, sensor_indices],
+            description=description,
+        )
+
+        slices_train_pred = split_till_it_fits(
+            render_slices_prediction,
+            sdf_slice_prediction_splits,
+            the_model,
+            plot_recordings_train,
+            description,
+            colour_function=colourize_sdf,
+        )
+        slices_train = concat_images(slices_train_gt, slices_train_pred)
+
+        writer.add_image(
+            "SDF Ground Truth, SDF Prediction (train)",
+            slices_train,
+            global_iteration,
+        )
+
+        slices_val_gt = render_slices_ground_truth(
+            val_batch_gpu["sdf"][0],
+            description,
+            colour_function=colourize_sdf,
+        )
+
+        plot_recordings_val = convolve_recordings(
+            fm_chirp=fm_chirp,
+            sensor_recordings=val_batch_gpu["sensor_recordings"][0, sensor_indices],
+            description=description,
+        )
+        slices_val_pred = split_till_it_fits(
+            render_slices_prediction,
+            sdf_slice_prediction_splits,
+            the_model,
+            plot_recordings_val,
+            description,
+            colour_function=colourize_sdf,
+        )
+        slices_val = concat_images(slices_val_gt, slices_val_pred)
+        writer.add_image(
+            "SDF Ground Truth, SDF Prediction (validation)",
+            slices_val,
+            global_iteration,
+        )
 
     model = TimeOfFlightNet(
         speed_of_sound=description.air_properties.speed_of_sound,
@@ -329,9 +406,11 @@ def main():
                         (global_iteration) % args.plotinterval, args.plotinterval
                     )
 
-                    validation_time = (
-                        ((global_iteration + 1) % args.validationinterval) == 0
-                    ) or (global_iteration == 0)
+                    # HACK
+                    validation_time = False
+                    # validation_time = (
+                    #     ((global_iteration + 1) % args.validationinterval) == 0
+                    # ) or (global_iteration == 0)
 
                     if validation_time:
                         model.eval()
@@ -357,57 +436,14 @@ def main():
                     ) == 0 or (global_iteration == 0)
 
                     if time_to_plot:
+                        # TODO: move this to a function to prevent memory leaks
                         model.eval()
 
                         print(
                             f"Epoch {i_epoch}, {global_iteration + 1} total iterations"
                         )
 
-                        val_batch_cpu = next(iter(val_loader))
-                        val_batch_gpu = val_batch_cpu.to(the_device)
-
-                        # plot the ground truth obstacles
-                        slices_train_gt = render_slices_ground_truth(
-                            batch_gpu["sdf"][0],
-                            description,
-                            locations=locations[0].to(the_device),
-                            colour_function=colourize_sdf,
-                        )
-                        slices_train_pred = split_till_it_fits(
-                            render_slices_prediction,
-                            sdf_slice_prediction_splits,
-                            model,
-                            batch_gpu["sensor_recordings"][0, sensor_indices],
-                            description,
-                            colour_function=colourize_sdf,
-                        )
-                        slices_train = concat_images(slices_train_gt, slices_train_pred)
-
-                        writer.add_image(
-                            "SDF Ground Truth, SDF Prediction (train)",
-                            slices_train,
-                            global_iteration,
-                        )
-
-                        slices_val_gt = render_slices_ground_truth(
-                            val_batch_gpu["sdf"][0],
-                            description,
-                            colour_function=colourize_sdf,
-                        )
-                        slices_val_pred = split_till_it_fits(
-                            render_slices_prediction,
-                            sdf_slice_prediction_splits,
-                            model,
-                            val_batch_gpu["sensor_recordings"][0, sensor_indices],
-                            description,
-                            colour_function=colourize_sdf,
-                        )
-                        slices_val = concat_images(slices_val_gt, slices_val_pred)
-                        writer.add_image(
-                            "SDF Ground Truth, SDF Prediction (validation)",
-                            slices_val,
-                            global_iteration,
-                        )
+                        plot_images(model)
 
                         if (
                             args.iterations is not None

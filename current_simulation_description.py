@@ -7,11 +7,12 @@ from kwave_util import make_ball, make_box
 Npml = 10  # spatial count
 
 Nx = 256 - 2 * Npml
-Ny = 128 - 2 * Npml
-Nz = 128 - 2 * Npml
-minimum_x_units = Nx - 128 - 64
+Ny = (16 * 7) - 2 * Npml
+Nz = (16 * 7) - 2 * Npml
 
-spatial_resolution = 0.005  # meters
+minimum_x_units = Ny
+
+spatial_resolution = 0.0075  # meters
 
 sensor_count_x = 4
 sensor_count_y = 4
@@ -19,6 +20,7 @@ sensor_count_z = 4
 
 
 def make_simulation_description():
+
     c_air = 343.0
     c_wood = 4000.0
     # c_human = 1540.0
@@ -29,15 +31,18 @@ def make_simulation_description():
     # rho_human = 1010.0
     # rho_dense_air = rho_air * 2.0
 
-    sensor_center_x = 16
+    sensor_center_x = minimum_x_units // 2
     sensor_center_y = Ny // 2
     sensor_center_z = Nz // 2
 
-    sensor_spacing = 4
+    # The sensors cover half the available distance
+    sensor_extent_x = 0.5 * minimum_x_units
+    sensor_extent_y = 0.5 * Ny
+    sensor_extent_z = 0.5 * Nz
 
-    sensor_extent_x = sensor_count_x * (sensor_spacing - 1)
-    sensor_extent_y = sensor_count_y * (sensor_spacing - 1)
-    sensor_extent_z = sensor_count_z * (sensor_spacing - 1)
+    sensor_spacing_x = sensor_extent_x / (sensor_count_x - 1)
+    sensor_spacing_y = sensor_extent_y / (sensor_count_y - 1)
+    sensor_spacing_z = sensor_extent_z / (sensor_count_z - 1)
 
     sensor_indices = []
 
@@ -45,9 +50,15 @@ def make_simulation_description():
     for i in range(sensor_count_x):
         for j in range(sensor_count_y):
             for k in range(sensor_count_z):
-                x = round(sensor_center_x - (sensor_extent_x / 2) + sensor_spacing * i)
-                y = round(sensor_center_y - (sensor_extent_y / 2) + sensor_spacing * j)
-                z = round(sensor_center_z - (sensor_extent_z / 2) + sensor_spacing * k)
+                x = round(
+                    sensor_center_x - (sensor_extent_x / 2) + sensor_spacing_x * i
+                )
+                y = round(
+                    sensor_center_y - (sensor_extent_y / 2) + sensor_spacing_y * j
+                )
+                z = round(
+                    sensor_center_z - (sensor_extent_z / 2) + sensor_spacing_z * k
+                )
                 sensor_indices.append((x, y, z))
 
     air_properties = AcousticMediumProperties(

@@ -183,6 +183,39 @@ class SimulationDescription:
 
         self.has_obstacles = True
 
+    def print_summary(self):
+        print(f"--------Simulation Description--------")
+        print(f"Spatial Parameters")
+        print(f"    computational grid size:")
+        nx_total = self.Nx + 2 * self.Npml
+        ny_total = self.Ny + 2 * self.Npml
+        nz_total = self.Nz + 2 * self.Npml
+        print(f"        {nx_total} x {ny_total} x {nz_total} units")
+        print(f"    perfectly matched layers:")
+        print(f"        {self.Npml} units")
+        print(f"    spatial resolution:")
+        print(f"        {self.dx} x {self.dy} x {self.dz} meters per grid unit")
+        print(f"    inner physical volume:")
+        x_extent = self.Nx * self.dx
+        y_extent = self.Ny * self.dy
+        z_extent = self.Nz * self.dz
+        print(f"        {x_extent} x {y_extent} x {z_extent} meters")
+        print(f"Temporal Parameters:")
+        print(f"    total time steps:")
+        print(f"        {self.Nt} steps")
+        print(f"    time step size:")
+        print(f"        {self.dt} seconds")
+        print(f"    total physical duration:")
+        print(f"        {self.Nt * self.dt} seconds")
+        print(f"    output sampling rate:")
+        print(f"        {self.output_sampling_frequency} Hz")
+        print(f"    output length:")
+        print(f"        {self.output_length} samples")
+        fmax = self.air_properties.speed_of_sound / (2.0 * self.dx)
+        print(f"    maximum supported frequency:")
+        print(f"        {fmax} Hz")
+        print(f"--------------------------------------")
+
     def make_simulation_index_flat(self, x, y, z):
         return (
             1

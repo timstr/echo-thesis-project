@@ -124,14 +124,16 @@ class SimpleTOFPredictor(nn.Module):
         return magnitude
 
 
-def colourize_bw_log(x):
+def colourize_bw_log(x, vmin, vmax):
     assert isinstance(x, torch.Tensor)
+    assert isinstance(vmin, float)
+    assert isinstance(vmax, float)
+    assert vmin > 0.0
+    assert vmax > vmin
     assert len(x.shape) == 2
     xmin = torch.min(torch.abs(x)).item()
     xmax = torch.max(torch.abs(x)).item()
     print(f"Note: the abs min is {xmin} and the abs max is {xmax}")
-    vmin = 1
-    vmax = 3
     logmin = math.log(vmin)
     logmax = math.log(vmax)
     linlogposx = (torch.log(torch.clamp(x, min=vmin, max=vmax)) - logmin) / (
@@ -147,14 +149,35 @@ def colourize_bw_log(x):
 
 def main():
     parser = ArgumentParser()
+    parser.add_argument("path_to_dataset", type=str)
+    parser.add_argument("index", nargs="?", type=int, default=0)
     parser.add_argument("--tofcropsize", type=int, dest="tofcropsize", default=64)
     parser.add_argument("--nx", type=int, dest="nx", default=4)
     parser.add_argument("--ny", type=int, dest="ny", default=4)
     parser.add_argument("--nz", type=int, dest="nz", default=4)
+    parser.add_argument(
+        "--f0", type=float, dest="f0", help="chirp start frequency (Hz)", default=0.0
+    )
+    parser.add_argument(
+        "--f1", type=float, dest="f1", help="end frequency (Hz)", default=20_000.0
+    )
+    parser.add_argument(
+        "--l", type=float, dest="l", help="chirp duration (seconds)", default=0.001
+    )
+    parser.add_argument(
+        "--vmin", type=float, dest="vmin", help="minimum displayable value", default=0.1
+    )
+    parser.add_argument(
+        "--vmax",
+        type=float,
+        dest="vmax",
+        help="maximum displayable value",
+        default=10.0,
+    )
     args = parser.parse_args()
 
     description = make_simulation_description()
-    dataset = WaveDataset3d(description, "dataset_half_cm_1_of_1.h5")
+    dataset = WaveDataset3d(description, args.path_to_dataset)
 
     sensor_indices = make_receiver_indices(
         args.nx,
@@ -162,114 +185,66 @@ def main():
         args.nz,
     )
 
-    first_recording = dataset[0]["sensor_recordings"][0]
-
     chirp = torch.tensor(
         make_fm_chirp(
-            begin_frequency_Hz=32_000.0,
-            end_frequency_Hz=16_000.0,
+            begin_frequency_Hz=args.f0,
+            end_frequency_Hz=args.f1,
             sampling_frequency=description.output_sampling_frequency,
             chirp_length_samples=math.ceil(
-                0.001 * description.output_sampling_frequency
+                args.l * description.output_sampling_frequency
             ),
             wave="sine",
         )
     ).float()
 
-    first_recording_convolved = convolve_recordings(
-        chirp, first_recording.unsqueeze(0), description
-    ).squeeze(0)
-
-    fig, axes = plt.subplots(5, 1, figsize=(8, 4), dpi=80)
-
-    axes[0].title.set_text("Impulse Response (Time Domain)")
-    axes[0].plot(first_recording)
-
-    axes[1].title.set_text("Impulse Response (Frequency Domain)")
-    axes[1].plot(
-        fft.rfftfreq(
-            description.output_length, d=(1.0 / description.output_sampling_frequency)
-        ),
-        np.abs(fft.rfft(first_recording.numpy())),
-    )
-
-    axes[2].title.set_text("FM Chirp (Time Domain)")
-    axes[2].plot(chirp)
-
-    axes[3].title.set_text("Combined (Time Domain)")
-    axes[3].plot(first_recording_convolved)
-
-    axes[4].title.set_text("Combined (Frequency Domain)")
-    axes[4].plot(
-        fft.rfftfreq(
-            description.output_length, d=(1.0 / description.output_sampling_frequency)
-        ),
-        np.abs(fft.rfft(first_recording_convolved.numpy())),
-    )
-
-    axes[0].set_xlim(0, description.output_length - 1)
-    axes[2].set_xlim(0, description.output_length - 1)
-    axes[3].set_xlim(0, description.output_length - 1)
-
-    plt.show()
-
     chirp = chirp.to(the_device)
 
     splits = SplitSize("render_slices_prediction")
 
-    for i in range(1000):
-        # for i in [7, 9, 24, 27, 29, 36, 43, 46, 53, 61]:
-        print(i)
-        # 7 - single small circle, kinda far away
-        # 9 - single small circle, far away
-        # 24 - single small circle, close
-        # 27 - single large circle, far away
-        # 29 - single large circle, kinda far away
-        # 36 - single large circle, medium distance
-        # 43 - two small circles, medium and kinda far
-        # 46 - single large circle, kinda close
-        # 53 - lotta stuff going on
-        # 61 - near and far circles
-        example = dataset[i]
-
-        recordings_ir = example["sensor_recordings"][sensor_indices].to(the_device)
-
-        recordings_chirp = convolve_recordings(chirp, recordings_ir, description)
-        # recordings_chirp = recordings_ir
-
-        obstacles = example["sdf"].to(the_device)
-
-        model = SimpleTOFPredictor(
-            speed_of_sound=description.air_properties.speed_of_sound,
-            sampling_frequency=description.output_sampling_frequency,
-            recording_length_samples=description.output_length,
-            crop_length_samples=args.tofcropsize,
-            emitter_location=description.emitter_location,
-            receiver_locations=description.sensor_locations[sensor_indices],
-        ).to(the_device)
-
-        fig, axes = plt.subplots(1, 2, figsize=(8, 4), dpi=80)
-
-        axes[0].imshow(
-            render_slices_ground_truth(
-                obstacle_map=obstacles,
-                description=description,
-                colour_function=colourize_sdf,
-            ).permute(1, 2, 0)
+    if args.index < 0 or args.index >= len(dataset):
+        print(
+            f"The dataset index {args.index} is out of bounds. Valid indices are 0 to {len(dataset) - 1}"
         )
+    example = dataset[args.index]
 
-        axes[1].imshow(
-            split_till_it_fits(
-                render_slices_prediction,
-                splits,
-                model=model,
-                recordings=recordings_chirp,
-                description=description,
-                colour_function=colourize_bw_log,
-            ).permute(1, 2, 0)
-        )
+    recordings_ir = example["sensor_recordings"][sensor_indices].to(the_device)
 
-        plt.show()
+    recordings_chirp = convolve_recordings(chirp, recordings_ir, description)
+    # recordings_chirp = recordings_ir
+
+    obstacles = example["sdf"].to(the_device)
+
+    model = SimpleTOFPredictor(
+        speed_of_sound=description.air_properties.speed_of_sound,
+        sampling_frequency=description.output_sampling_frequency,
+        recording_length_samples=description.output_length,
+        crop_length_samples=args.tofcropsize,
+        emitter_location=description.emitter_location,
+        receiver_locations=description.sensor_locations[sensor_indices],
+    ).to(the_device)
+
+    fig, axes = plt.subplots(1, 2, figsize=(8, 4), dpi=80)
+
+    axes[0].imshow(
+        render_slices_ground_truth(
+            obstacle_map=obstacles,
+            description=description,
+            colour_function=colourize_sdf,
+        ).permute(1, 2, 0)
+    )
+
+    axes[1].imshow(
+        split_till_it_fits(
+            render_slices_prediction,
+            splits,
+            model=model,
+            recordings=recordings_chirp,
+            description=description,
+            colour_function=lambda x: colourize_bw_log(x, args.vmin, args.vmax),
+        ).permute(1, 2, 0)
+    )
+
+    plt.show()
 
 
 if __name__ == "__main__":

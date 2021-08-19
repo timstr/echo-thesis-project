@@ -1,4 +1,3 @@
-from tof_utils import obstacle_map_to_sdf
 import fix_dead_command_line
 
 import h5py
@@ -18,6 +17,7 @@ from current_simulation_description import (
     Nz,
 )
 from utils import assert_eq
+from tof_utils import obstacle_map_to_sdf
 
 
 def middle_is_empty(obstacles):
@@ -109,6 +109,8 @@ def main():
     assert workerindex >= 0 and workerindex < numworkers
 
     desc = make_simulation_description()
+
+    desc.print_summary()
 
     dataset_path = os.environ.get("DATASET_OUTPUT")
 

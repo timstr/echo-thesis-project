@@ -1,5 +1,6 @@
 import fix_dead_command_line
 
+import sys
 import math
 import matplotlib.pyplot as plt
 import torch
@@ -11,6 +12,13 @@ from time_of_flight_net import sclog
 
 
 def main():
+    if len(sys.argv) not in [2, 3]:
+        print(f"usage: {sys.argv[0]} path/to/dataset.h5 [index]")
+        exit(-1)
+    path_to_dataset = sys.argv[1]
+    dataset_index = 0
+    if len(sys.argv) == 3:
+        dataset_index = int(sys.argv[2])
 
     # Questions:
     # - why does grid_sample appear to be normalizing the input grid to [0, num_samples] or similar rather than [-1, 1]???
@@ -19,9 +27,9 @@ def main():
     description = make_simulation_description()
 
     # dataset = WaveDataset3d(desc, "dataset_train.h5")
-    dataset = WaveDataset3d(description, "dataset_half_cm_1_of_1.h5")
+    dataset = WaveDataset3d(description, path_to_dataset)
 
-    example = dataset[2]
+    example = dataset[dataset_index]
 
     obstacles = example["obstacles"]
 

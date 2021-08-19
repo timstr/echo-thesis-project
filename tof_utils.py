@@ -132,10 +132,14 @@ def make_random_training_locations(
         return locations
 
 
-def all_grid_locations(device, description):
+def all_grid_locations(device, description, downsample_factor):
     assert isinstance(description, SimulationDescription)
+    assert isinstance(downsample_factor, int)
+    assert downsample_factor >= 1
     xmin_location = (minimum_x_units - description.emitter_indices[0]) * description.dx
-    x_steps = description.Nx - minimum_x_units
+    x_steps = (description.Nx - minimum_x_units) // downsample_factor
+    y_steps = description.Ny // downsample_factor
+    z_steps = description.Nz // downsample_factor
     x_ls = torch.linspace(
         start=xmin_location,
         end=description.xmax,
@@ -145,39 +149,38 @@ def all_grid_locations(device, description):
     y_ls = torch.linspace(
         start=description.ymin,
         end=description.ymax,
-        steps=description.Ny,
+        steps=y_steps,
         device=device,
     )
     z_ls = torch.linspace(
         start=description.zmin,
         end=description.zmax,
-        steps=description.Nz,
+        steps=z_steps,
         device=device,
     )
     gx, gy, gz = torch.meshgrid([x_ls, y_ls, z_ls])
     gx = gx.flatten()
     gy = gy.flatten()
     gz = gz.flatten()
-    assert_eq(gx.shape, (x_steps * description.Ny * description.Nz,))
-    assert_eq(gy.shape, (x_steps * description.Ny * description.Nz,))
-    assert_eq(gz.shape, (x_steps * description.Ny * description.Nz,))
+    assert_eq(gx.shape, (x_steps * y_steps * z_steps,))
+    assert_eq(gy.shape, (x_steps * y_steps * z_steps,))
+    assert_eq(gz.shape, (x_steps * y_steps * z_steps,))
     all_locations = torch.stack([gx, gy, gz], dim=1)
-    assert_eq(all_locations.shape, (x_steps * description.Ny * description.Nz, 3))
+    assert_eq(all_locations.shape, (x_steps * y_steps * z_steps, 3))
     return all_locations
 
 
-def evaluate_prediction(sdf_pred, sdf_gt, description):
+def evaluate_prediction(sdf_pred, sdf_gt, description, downsample_factor):
     assert isinstance(sdf_pred, torch.Tensor)
     assert isinstance(sdf_gt, torch.Tensor)
     assert isinstance(description, SimulationDescription)
-    assert_eq(
-        sdf_pred.shape,
-        ((description.Nx - minimum_x_units), description.Ny, description.Nz),
-    )
-    assert_eq(
-        sdf_gt.shape,
-        ((description.Nx - minimum_x_units), description.Ny, description.Nz),
-    )
+    assert isinstance(downsample_factor, int)
+    assert downsample_factor >= 1
+    x_steps = (description.Nx - minimum_x_units) // downsample_factor
+    y_steps = description.Ny // downsample_factor
+    z_steps = description.Nz // downsample_factor
+    assert_eq(sdf_pred.shape, (x_steps, y_steps, z_steps))
+    assert_eq(sdf_gt.shape, (x_steps, y_steps, z_steps))
 
     mse_sdf = torch.mean((sdf_pred - sdf_gt) ** 2).item()
 
@@ -655,6 +658,87 @@ def time_of_flight_crop(
     return recordings_cropped
 
 
+# def make_positive_distance_field(obstacle_map, description):
+#     assert isinstance(obstacle_map, torch.Tensor)
+#     assert_eq(obstacle_map.dtype, torch.bool)
+#     assert isinstance(description, SimulationDescription)
+#     assert_eq(obstacle_map.shape, (description.Nx, description.Ny, description.Nz))
+
+#     kernel_radius = 2
+#     kernel_size = 2 * kernel_radius + 1
+
+#     distance_offsets = torch.empty(
+#         (kernel_size, kernel_size, kernel_size), dtype=torch.float32
+#     )
+#     for i in range(kernel_size):
+#         dx = (i - kernel_radius) * description.dx
+#         for j in range(kernel_size):
+#             dy = (j - kernel_radius) * description.dy
+#             for k in range(kernel_size):
+#                 dz = (k - kernel_radius) * description.dz
+#                 d = math.sqrt(dx ** 2 + dy ** 2 + dz ** 2)
+#                 distance_offsets[i, j, k] = d
+#     distance_offsets = distance_offsets.reshape(
+#         1, 1, 1, kernel_size, kernel_size, kernel_size
+#     )
+#     distance_offsets = distance_offsets.to(obstacle_map.device)
+
+#     pad_sizes = 3 * (kernel_radius, kernel_radius)
+
+#     # positive distance field
+#     pdf = torch.full(
+#         size=(description.Nx, description.Ny, description.Nz),
+#         fill_value=np.inf,
+#         dtype=torch.float32,
+#         device=obstacle_map.device,
+#     )
+#     pdf[obstacle_map] = 0.0
+#     num_iters = max(description.Nx, description.Ny, description.Nz) // kernel_radius
+#     for current_iter in range(num_iters):
+#         # pad with inf on each spatial axis
+#         pdf_padded = F.pad(
+#             pdf,
+#             pad=pad_sizes,
+#             mode="constant",
+#             value=np.inf,
+#         )
+#         assert_eq(
+#             pdf_padded.shape,
+#             (
+#                 description.Nx + 2 * kernel_radius,
+#                 description.Ny + 2 * kernel_radius,
+#                 description.Nz + 2 * kernel_radius,
+#             ),
+#         )
+#         # unfold in each spatial dimension to create 3x3x3 kernels
+#         pdf_unfolded = (
+#             pdf_padded.unfold(dimension=0, size=kernel_size, step=1)
+#             .unfold(dimension=1, size=kernel_size, step=1)
+#             .unfold(dimension=2, size=kernel_size, step=1)
+#         )
+#         assert_eq(
+#             pdf_unfolded.shape,
+#             (
+#                 description.Nx,
+#                 description.Ny,
+#                 description.Nz,
+#                 kernel_size,
+#                 kernel_size,
+#                 kernel_size,
+#             ),
+#         )
+#         # add distance offsets to each kernel value
+#         pdf_offset = pdf_unfolded + distance_offsets
+#         # take the minimum over each kernel
+#         pdf_offset_flat = pdf_offset.reshape(
+#             description.Nx, description.Ny, description.Nz, kernel_size ** 3
+#         )
+#         pdf_min, pdf_idx = torch.min(pdf_offset_flat, dim=3)
+#         assert_eq(pdf_min.shape, (description.Nx, description.Ny, description.Nz))
+#         pdf = pdf_min
+#     return pdf
+
+
 def make_positive_distance_field(obstacle_map, description):
     assert isinstance(obstacle_map, torch.Tensor)
     assert_eq(obstacle_map.dtype, torch.bool)
@@ -675,10 +759,6 @@ def make_positive_distance_field(obstacle_map, description):
                 dz = (k - kernel_radius) * description.dz
                 d = math.sqrt(dx ** 2 + dy ** 2 + dz ** 2)
                 distance_offsets[i, j, k] = d
-    distance_offsets = distance_offsets.reshape(
-        1, 1, 1, kernel_size, kernel_size, kernel_size
-    )
-    distance_offsets = distance_offsets.to(obstacle_map.device)
 
     pad_sizes = 3 * (kernel_radius, kernel_radius)
 
@@ -691,6 +771,8 @@ def make_positive_distance_field(obstacle_map, description):
     )
     pdf[obstacle_map] = 0.0
     num_iters = max(description.Nx, description.Ny, description.Nz) // kernel_radius
+
+    print("Computing SDF from obstacle map")
     for current_iter in range(num_iters):
         # pad with inf on each spatial axis
         pdf_padded = F.pad(
@@ -707,32 +789,34 @@ def make_positive_distance_field(obstacle_map, description):
                 description.Nz + 2 * kernel_radius,
             ),
         )
-        # unfold in each spatial dimension to create 3x3x3 kernels
-        pdf_unfolded = (
-            pdf_padded.unfold(dimension=0, size=kernel_size, step=1)
-            .unfold(dimension=1, size=kernel_size, step=1)
-            .unfold(dimension=2, size=kernel_size, step=1)
-        )
+
+        for i in range(kernel_size):
+            x_lo = i
+            x_hi = description.Nx + i
+            for j in range(kernel_size):
+                y_lo = j
+                y_hi = description.Ny + j
+                for k in range(kernel_size):
+                    z_lo = k
+                    z_hi = description.Nz + k
+
+                    shifted = pdf_padded[x_lo:x_hi, y_lo:y_hi, z_lo:z_hi]
+
+                    shifted_offset = shifted + distance_offsets[i, j, k].item()
+
+                    pdf = torch.minimum(pdf, shifted_offset)
+
         assert_eq(
-            pdf_unfolded.shape,
+            pdf.shape,
             (
                 description.Nx,
                 description.Ny,
                 description.Nz,
-                kernel_size,
-                kernel_size,
-                kernel_size,
             ),
         )
-        # add distance offsets to each kernel value
-        pdf_offset = pdf_unfolded + distance_offsets
-        # take the minimum over each kernel
-        pdf_offset_flat = pdf_offset.reshape(
-            description.Nx, description.Ny, description.Nz, kernel_size ** 3
-        )
-        pdf_min, pdf_idx = torch.min(pdf_offset_flat, dim=3)
-        assert_eq(pdf_min.shape, (description.Nx, description.Ny, description.Nz))
-        pdf = pdf_min
+
+        progress_bar(current_iter, num_iters)
+
     return pdf
 
 
@@ -1180,9 +1264,14 @@ def convolve_recordings(fm_chirp, sensor_recordings, description):
         B, R, L_recording = sensor_recordings.shape
         assert_eq(L_recording, description.output_length)
         assert L_chirp <= L_recording
+        chirp_padded = torch.cat(
+            [torch.zeros((L_chirp - 1,), device=fm_chirp.device), fm_chirp], dim=0
+        )
+        L_chirp_padded = 2 * L_chirp - 1
+        assert_eq(chirp_padded.shape, (L_chirp_padded,))
         result = F.conv1d(
             input=sensor_recordings.reshape(B * R, 1, L_recording),
-            weight=fm_chirp.reshape(1, 1, L_chirp),
+            weight=chirp_padded.flip(dims=[0]).reshape(1, 1, L_chirp_padded),
             bias=None,
             stride=1,
             padding="same",
