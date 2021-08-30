@@ -20,10 +20,6 @@ def main():
     if len(sys.argv) == 3:
         dataset_index = int(sys.argv[2])
 
-    # Questions:
-    # - why does grid_sample appear to be normalizing the input grid to [0, num_samples] or similar rather than [-1, 1]???
-    # - Are the simulation grid indices correct? Try running a dense simulation and visualizing it. Because of the oblong shape, something will probably be out of bounds if it's wrong
-
     description = make_simulation_description()
 
     # dataset = WaveDataset3d(desc, "dataset_train.h5")

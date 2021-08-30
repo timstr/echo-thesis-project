@@ -36,6 +36,7 @@ def split_till_it_fits(fn, split_size, *args, **kwargs):
         "out of memory",
         "not enough memory",
         "This error may appear if you passed in a non-contiguous input",
+        # "CUBLAS_STATUS_ALLOC_FAILED",
     ]
     while split_size.get() <= max_size:
         try:
@@ -433,28 +434,33 @@ def render_slices_ground_truth(
     )
 
 
-def split_network_prediction(model, locations, recordings, description, num_splits):
-    assert isinstance(model, nn.Module)
-    assert isinstance(locations, torch.Tensor)
-    assert isinstance(recordings, torch.Tensor)
-    assert isinstance(description, SimulationDescription)
-    assert isinstance(num_splits, int)
-    N, D = locations.shape
-    locations = locations.reshape(1, N, D)
-    assert_eq(D, 3)
-    R, L = recordings.shape
-    assert_eq(L, description.output_length)
-    recordings = recordings.reshape(1, R, L)
-    splits = []
-    for i in range(num_splits):
-        split_lo = N * i // num_splits
-        split_hi = N * (i + 1) // num_splits
-        xyz_split = locations[:, split_lo:split_hi]
-        prediction_split = model(recordings=recordings, sample_locations=xyz_split)
-        splits.append(prediction_split)
-    prediction = torch.cat(splits, dim=1).squeeze(0)
-    assert_eq(prediction.shape, (N,))
-    return prediction
+def split_network_prediction(
+    model, locations, recordings, description, num_splits, show_progress_bar=False
+):
+    with torch.no_grad():
+        assert isinstance(model, nn.Module)
+        assert isinstance(locations, torch.Tensor)
+        assert isinstance(recordings, torch.Tensor)
+        assert isinstance(description, SimulationDescription)
+        assert isinstance(num_splits, int)
+        N, D = locations.shape
+        locations = locations.reshape(1, N, D)
+        assert_eq(D, 3)
+        R, L = recordings.shape
+        assert_eq(L, description.output_length)
+        recordings = recordings.reshape(1, R, L)
+        splits = []
+        for i in range(num_splits):
+            split_lo = N * i // num_splits
+            split_hi = N * (i + 1) // num_splits
+            xyz_split = locations[:, split_lo:split_hi]
+            prediction_split = model(recordings=recordings, sample_locations=xyz_split)
+            splits.append(prediction_split)
+            if show_progress_bar:
+                progress_bar(i, num_splits)
+        prediction = torch.cat(splits, dim=1).squeeze(0)
+        assert_eq(prediction.shape, (N,))
+        return prediction
 
 
 def render_slices_prediction(
@@ -1106,14 +1112,42 @@ def _raymarch_sdf_impl(
 
         num_iterations = 64
         for i in range(num_iterations):
-            # get SDF values at each ray location
-            sampled_sdf_obstacles = _sample_obstacle_sdf(locations)
+            outside_x = torch.logical_or(
+                locations[0] < description.xmin, locations[0] > description.xmax
+            )
+            outside_y = torch.logical_or(
+                locations[1] < description.ymin, locations[1] > description.ymax
+            )
+            outside_z = torch.logical_or(
+                locations[2] < description.zmin, locations[2] > description.zmax
+            )
 
-            sampled_sdf_axes = _simulation_boundary_sdf(
-                description, locations, radius=0.001
+            outside = torch.logical_or(
+                outside_x, torch.logical_or(outside_y, outside_z)
+            )
+
+            original_locations = locations.clone()
+
+            locations[0].clamp_(min=description.xmin, max=description.xmax)
+            locations[1].clamp_(min=description.ymin, max=description.ymax)
+            locations[2].clamp_(min=description.zmin, max=description.zmax)
+
+            clamp_displacement = torch.sqrt(
+                torch.sum(torch.square(locations - original_locations), dim=0)
+            )
+            clamp_displacement *= 0.8
+
+            # get SDF values at each ray location
+            sampled_sdf_obstacles = _sample_obstacle_sdf(locations) + clamp_displacement
+
+            sampled_sdf_axes = (
+                _simulation_boundary_sdf(description, original_locations, radius=0.001)
+                # + clamp_displacement
             )
 
             sampled_sdf = torch.minimum(sampled_sdf_obstacles, sampled_sdf_axes)
+
+            locations = original_locations
 
             # if SDF value is below threshold, make inactive
             threshold = 0.001
@@ -1264,17 +1298,21 @@ def convolve_recordings(fm_chirp, sensor_recordings, description):
         B, R, L_recording = sensor_recordings.shape
         assert_eq(L_recording, description.output_length)
         assert L_chirp <= L_recording
-        chirp_padded = torch.cat(
-            [torch.zeros((L_chirp - 1,), device=fm_chirp.device), fm_chirp], dim=0
+        sensor_recordings_padded = torch.cat(
+            [
+                torch.zeros((B, R, L_chirp - 1), device=sensor_recordings.device),
+                sensor_recordings,
+            ],
+            dim=2,
         )
-        L_chirp_padded = 2 * L_chirp - 1
-        assert_eq(chirp_padded.shape, (L_chirp_padded,))
+        L_recording_padded = L_recording + L_chirp - 1
+        assert_eq(sensor_recordings_padded.shape, (B, R, L_recording_padded))
         result = F.conv1d(
-            input=sensor_recordings.reshape(B * R, 1, L_recording),
-            weight=chirp_padded.flip(dims=[0]).reshape(1, 1, L_chirp_padded),
+            input=sensor_recordings_padded.reshape(B * R, 1, L_recording_padded),
+            weight=fm_chirp.flip(0).reshape(1, 1, L_chirp),
             bias=None,
             stride=1,
-            padding="same",
+            padding=0,
             dilation=1,
             groups=1,
         )
@@ -1282,3 +1320,13 @@ def convolve_recordings(fm_chirp, sensor_recordings, description):
         if batch_mode:
             return result.reshape(B, R, L_recording)
         return result.reshape(R, L_recording)
+
+
+def save_module(the_module, filename):
+    print(f'Saving module to "{filename}"')
+    torch.save(the_module.state_dict(), filename)
+
+
+def restore_module(the_module, filename):
+    print('Restoring module from "{}"'.format(filename))
+    the_module.load_state_dict(torch.load(filename))

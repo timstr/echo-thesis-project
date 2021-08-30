@@ -1,7 +1,9 @@
+from utils import progress_bar
 from assert_eq import assert_eq
 import h5py
 import numpy as np
 import torch
+import hashlib
 
 from h5ds import H5DS
 from simulation_description import SimulationDescription
@@ -70,6 +72,17 @@ class WaveDataset3d(torch.utils.data.Dataset):
             extensible=True,
         )
 
+        self.bytes_per_hash = 256 // 8
+        self.obstacle_hashes = H5DS(
+            name="obstacle_hashes",
+            dtype=np.uint8,
+            shape=(self.bytes_per_hash,),
+            extensible=True,
+        )
+
+        self._obstacle_hashes_cache = []
+        self._obstacle_hashes_cache_stale = True
+
         if len(self.h5file.keys()) == 0 and write:
             self._create_empty_dataset()
 
@@ -79,11 +92,15 @@ class WaveDataset3d(torch.utils.data.Dataset):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.h5file.close()
+        self.close()
+        if exc_type == SystemExit:
+            print("Dataset was closed due to SystemExit")
         return False
 
     def close(self):
         self.h5file.close()
+        self._obstacle_hashes_cache = []
+        self._obstacle_hashes_cache_stale = True
 
     def _create_empty_dataset(self):
         assert self.write, "The dataset must be opened with write=True"
@@ -114,6 +131,11 @@ class WaveDataset3d(torch.utils.data.Dataset):
         self.sensor_recordings.create(self.h5file)
         self.obstacles.create(self.h5file)
         self.signed_distance_fields.create(self.h5file)
+
+        self.obstacle_hashes.create(self.h5file)
+
+        self._obstacle_hashes_cache = []
+        self._obstacle_hashes_cache_stale = False
 
     def validate(self):
         assert self.h5file, "The file must be open"
@@ -150,11 +172,20 @@ class WaveDataset3d(torch.utils.data.Dataset):
         assert self.obstacles.exists(self.h5file)
         assert self.signed_distance_fields.exists(self.h5file)
 
-        assert_eq(
-            self.sensor_recordings.count(self.h5file), self.obstacles.count(self.h5file)
-        )
+        N = self.sensor_recordings.count(self.h5file)
 
-    def append_to_dataset(self, obstacles, recordings, sdf):
+        assert_eq(self.obstacles.count(self.h5file), N)
+
+        assert_eq(self.signed_distance_fields.count(self.h5file), N)
+
+        # HACK
+        # TODO: assert that obstacle_hashes exists and always assert count
+        if self.obstacle_hashes.exists(self.h5file):
+            assert_eq(self.obstacle_hashes.count(self.h5file), N)
+        else:
+            print("WARNING: obstacle hashes not found in dataset")
+
+    def append_to_dataset(self, obstacles, recordings, sdf, skip_duplicates=False):
         assert self.write, "The dataset must be opened with write=True"
         assert self.h5file, "The file must be open"
         assert isinstance(obstacles, np.ndarray) or isinstance(obstacles, torch.Tensor)
@@ -184,10 +215,31 @@ class WaveDataset3d(torch.utils.data.Dataset):
             self.description.Nz,
         )
 
+        hash_result = self._hash_obstacles(obstacles)
+
+        self._update_obstacle_hash_cache()
+
+        N = len(self._obstacle_hashes_cache)
+        for i in range(N):
+            other_hash = self._obstacle_hashes_cache[i]
+            if np.all(hash_result == other_hash):
+                if skip_duplicates:
+                    return False
+                raise Exception(
+                    "Attempted to add a set of obstacles that were already present in the dataset"
+                )
+
+        self.obstacle_hashes.append(self.h5file, hash_result)
+
+        assert not self._obstacle_hashes_cache_stale
+        self._obstacle_hashes_cache.append(hash_result)
+
         self.sensor_recordings.append(self.h5file, recordings)
         self.obstacles.append(self.h5file, obstacles)
         self.signed_distance_fields.append(self.h5file, sdf)
         self.validate()
+
+        return True
 
     def __len__(self):
         assert self.h5file, "The file must be open"
@@ -209,3 +261,65 @@ class WaveDataset3d(torch.utils.data.Dataset):
         return DeviceDict(
             {"sensor_recordings": sensor_recordings, "obstacles": obstacles, "sdf": sdf}
         )
+
+    def contains(self, obstacles):
+        hash_result = self._hash_obstacles(obstacles)
+        self._update_obstacle_hash_cache()
+        N = len(self._obstacle_hashes_cache)
+        for i in range(N):
+            if np.all(hash_result == self._obstacle_hashes_cache[i]):
+                return True
+        return False
+
+    def contains_any_duplicates(self):
+        assert self.h5file, "The file must be open"
+
+        self._update_obstacle_hash_cache()
+
+        N = len(self._obstacle_hashes_cache)
+
+        for i in range(N):
+            for j in range(i + 1, N):
+                if np.all(
+                    self._obstacle_hashes_cache[i] == self._obstacle_hashes_cache[j]
+                ):
+                    return True
+        return False
+
+    def _hash_obstacles(self, obstacles):
+        assert isinstance(obstacles, np.ndarray) or isinstance(obstacles, torch.Tensor)
+        assert obstacles.dtype in [np.bool8, torch.bool]
+        assert_eq(
+            obstacles.shape,
+            (
+                self.description.Nx,
+                self.description.Ny,
+                self.description.Nz,
+            ),
+        )
+
+        obstacles_packed = np.packbits(obstacles.flatten())
+        assert isinstance(obstacles_packed, np.ndarray)
+        assert_eq(obstacles_packed.dtype, np.uint8)
+
+        hash_fn = hashlib.sha256()
+        hash_fn.update(obstacles_packed.tobytes())
+        hash_result = np.frombuffer(
+            hash_fn.digest(), dtype=np.uint8, count=self.bytes_per_hash
+        )
+
+        return hash_result
+
+    def _update_obstacle_hash_cache(self):
+        if not self._obstacle_hashes_cache_stale:
+            return
+        N = self.obstacle_hashes.count(self.h5file)
+        self._obstacle_hashes_cache = []
+        print("Refreshing obstacle map cache...")
+        for i in range(N):
+            self._obstacle_hashes_cache.append(
+                self.obstacle_hashes.read(self.h5file, i)
+            )
+            progress_bar(i, N)
+        print("Refreshing obstacle map cache... Done")
+        self._obstacle_hashes_cache_stale = False

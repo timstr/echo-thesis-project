@@ -363,8 +363,8 @@ class SimulationDescription:
 
         assert os.path.isfile(hdf5_output_file_path)
 
-        with h5py.File(hdf5_output_file_path, "r") as interpolation_function:
-            pressure_vs_time = np.array(interpolation_function["p"])
+        with h5py.File(hdf5_output_file_path, "r") as output_file:
+            pressure_vs_time = np.array(output_file["p"])
             assert pressure_vs_time.shape == (
                 1,
                 self.Nt,

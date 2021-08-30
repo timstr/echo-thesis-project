@@ -1,4 +1,5 @@
 import fix_dead_command_line
+import cleanup_when_killed
 
 import math
 import torch
@@ -27,7 +28,9 @@ from tof_utils import (
     make_receiver_indices,
     render_slices_ground_truth,
     render_slices_prediction,
+    restore_module,
     sample_obstacle_map,
+    save_module,
     split_network_prediction,
     split_till_it_fits,
 )
@@ -44,37 +47,108 @@ def concat_images(img1, img2):
     return torchvision.utils.make_grid([img1, img2], nrow=2)
 
 
-def save_module(the_module, filename):
-    print(f'Saving module to "{filename}"')
-    torch.save(the_module.state_dict(), filename)
-
-
-def restore_module(the_module, filename):
-    print('Restoring module from "{}"'.format(filename))
-    the_module.load_state_dict(torch.load(filename))
-
-
 def main():
     parser = ArgumentParser()
 
-    parser.add_argument("--experiment", type=str, dest="experiment", required=True)
-    parser.add_argument("--batchsize", type=int, dest="batchsize", default=4)
-    parser.add_argument("--learningrate", type=float, dest="learningrate", default=1e-3)
-    parser.add_argument("--iterations", type=int, dest="iterations", default=None)
-    parser.add_argument("--tofcropsize", type=int, dest="tofcropsize", default=128)
     parser.add_argument(
-        "--samplesperexample", type=int, dest="samplesperexample", default=128
-    )
-    parser.add_argument("--nosave", dest="nosave", default=False, action="store_true")
-    parser.add_argument(
-        "--raymarch", dest="raymarch", default=False, action="store_true"
-    )
-    parser.add_argument("--plotinterval", type=int, dest="plotinterval", default=512)
-    parser.add_argument(
-        "--validationinterval", type=int, dest="validationinterval", default=256
+        "--experiment",
+        type=str,
+        dest="experiment",
+        required=True,
+        help="short description or mnemonic of reason for training, used in log files and model names",
     )
     parser.add_argument(
-        "--validationdownsampling", dest="validationdownsampling", type=int, default=1
+        "--batchsize",
+        type=int,
+        dest="batchsize",
+        default=4,
+        help="batch size used for each training iteration",
+    )
+    parser.add_argument(
+        "--learningrate",
+        type=float,
+        dest="learningrate",
+        default=1e-3,
+        help="optimizer learning rate",
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        dest="iterations",
+        default=None,
+        help="if specified, number of iterations to train for. Trains forever if not specified.",
+    )
+    parser.add_argument(
+        "--tofcropsize",
+        type=int,
+        dest="tofcropsize",
+        default=256,
+        help="Number of samples used in time-of-flight crop",
+    )
+
+    parser.add_argument(
+        "--chirpf0",
+        type=float,
+        dest="chirpf0",
+        default=18_000.0,
+        help="chirp start frequency (Hz)",
+    )
+    parser.add_argument(
+        "--chirpf1",
+        type=float,
+        dest="chirpf1",
+        default=22_000.0,
+        help="chirp end frequency (Hz)",
+    )
+    parser.add_argument(
+        "--chirplen",
+        type=float,
+        dest="chirplen",
+        default=0.002,
+        help="chirp duration (seconds)",
+    )
+
+    parser.add_argument(
+        "--samplesperexample",
+        type=int,
+        dest="samplesperexample",
+        default=128,
+        help="number of spatial locations per example to train on, similar to batch size, but per-example, not per-batch",
+    )
+    parser.add_argument(
+        "--nosave",
+        dest="nosave",
+        default=False,
+        action="store_true",
+        help="do not save model files",
+    )
+    parser.add_argument(
+        "--raymarch",
+        dest="raymarch",
+        default=False,
+        action="store_true",
+        help="when plotting, render raymarched 3D images",
+    )
+    parser.add_argument(
+        "--plotinterval",
+        type=int,
+        dest="plotinterval",
+        default=512,
+        help="number of training iterations between generating visualizations",
+    )
+    parser.add_argument(
+        "--validationinterval",
+        type=int,
+        dest="validationinterval",
+        default=256,
+        help="number of training iterations between computating validation metrics",
+    )
+    parser.add_argument(
+        "--validationdownsampling",
+        dest="validationdownsampling",
+        type=int,
+        default=1,
+        help="factor by which to downsample space when densely computing validation metrics, relative to full dataset resolution",
     )
     parser.add_argument("--receivercountx", type=int, dest="receivercountx", default=2)
     parser.add_argument("--receivercounty", type=int, dest="receivercounty", default=2)
@@ -136,7 +210,7 @@ def main():
 
     val_loader = torch.utils.data.DataLoader(
         dataset_val,
-        batch_size=1,  # NOTE: batch size is 1 because this is only used for plotting
+        batch_size=1,
         num_workers=0,
         pin_memory=False,
         shuffle=True,
@@ -144,16 +218,14 @@ def main():
         collate_fn=collate_fn_device,
     )
 
-    # NOTE: "maximum supported frequency: 17.15kHz" according to
-    # the matlab version of k-wave for a similar setup
     fm_chirp = (
         torch.tensor(
             make_fm_chirp(
-                begin_frequency_Hz=18_000.0,
-                end_frequency_Hz=22_000.0,
+                begin_frequency_Hz=args.chirpf0,
+                end_frequency_Hz=args.chirpf1,
                 sampling_frequency=description.output_sampling_frequency,
                 chirp_length_samples=math.ceil(
-                    0.001 * description.output_sampling_frequency
+                    args.chirplen * description.output_sampling_frequency
                 ),
                 wave="sine",
             )
@@ -161,11 +233,6 @@ def main():
         .float()
         .to(the_device)
     )
-
-    # # HACK
-    # print("HACK: not using FM chirp")
-    # fm_chirp[0] = 1.0
-    # fm_chirp[1:] = 0.0
 
     validation_splits = SplitSize("compute_validation_metrics")
 
@@ -226,11 +293,14 @@ def main():
             validation_end_time = datetime.datetime.now()
             duration = validation_end_time - validation_begin_time
             seconds = float(duration.seconds) + (duration.microseconds / 1_000_000.0)
-            print(f"Computing validation metrics done after {seconds} seconds.")
+            print(f"Computing validation done after {seconds} seconds.")
 
             return mean_metrics
 
     def plot_images(the_model):
+        visualization_begin_time = datetime.datetime.now()
+        print("Generating visualizations...")
+
         val_batch_cpu = next(iter(val_loader))
         val_batch_gpu = val_batch_cpu.to(the_device)
 
@@ -241,6 +311,8 @@ def main():
             locations=locations[0].to(the_device),
             colour_function=colourize_sdf,
         )
+
+        progress_bar(0, 4)
 
         plot_recordings_train = convolve_recordings(
             fm_chirp=fm_chirp,
@@ -256,6 +328,9 @@ def main():
             description,
             colour_function=colourize_sdf,
         )
+
+        progress_bar(1, 4)
+
         slices_train = concat_images(slices_train_gt, slices_train_pred)
 
         writer.add_image(
@@ -270,6 +345,8 @@ def main():
             colour_function=colourize_sdf,
         )
 
+        progress_bar(2, 4)
+
         plot_recordings_val = convolve_recordings(
             fm_chirp=fm_chirp,
             sensor_recordings=val_batch_gpu["sensor_recordings"][0, sensor_indices],
@@ -283,12 +360,20 @@ def main():
             description,
             colour_function=colourize_sdf,
         )
+
+        progress_bar(3, 4)
+
         slices_val = concat_images(slices_val_gt, slices_val_pred)
         writer.add_image(
             "SDF Ground Truth, SDF Prediction (validation)",
             slices_val,
             global_iteration,
         )
+
+        visualization_end_time = datetime.datetime.now()
+        duration = visualization_end_time - visualization_begin_time
+        seconds = float(duration.seconds) + (duration.microseconds / 1_000_000.0)
+        print(f"Generating visualizations done after {seconds} seconds.")
 
     model = TimeOfFlightNet(
         speed_of_sound=description.air_properties.speed_of_sound,
@@ -328,21 +413,20 @@ def main():
 
     log_path = os.path.join(log_path_root, log_folder_name)
 
-    def save_things(iteration, suffix=None):
-        assert isinstance(iteration, int)
+    def save_things(suffix=None):
         assert suffix is None or isinstance(suffix, str)
         save_module(
             model,
             os.path.join(
                 model_path,
-                f"model_{iteration + 1}{suffix or ''}.dat",
+                f"model_{suffix or ''}.dat",
             ),
         )
         save_module(
             optimizer,
             os.path.join(
                 model_path,
-                f"optimizer_{iteration + 1}{suffix or ''}.dat",
+                f"optimizer{'' if suffix is None else ('_' + suffix)}.dat",
             ),
         )
 
@@ -406,11 +490,9 @@ def main():
                         (global_iteration) % args.plotinterval, args.plotinterval
                     )
 
-                    # HACK
-                    validation_time = False
-                    # validation_time = (
-                    #     ((global_iteration + 1) % args.validationinterval) == 0
-                    # ) or (global_iteration == 0)
+                    validation_time = (
+                        ((global_iteration + 1) % args.validationinterval) == 0
+                    ) or (global_iteration == 0)
 
                     if validation_time:
                         model.eval()
@@ -418,12 +500,12 @@ def main():
                         model.train()
                         curr_val_mse = curr_val_metrics["mean_squared_error_sdf"]
                         if curr_val_mse < best_val_mse:
-                            best_val_loss = curr_val_mse
+                            best_val_mse = curr_val_mse
                             if not args.nosave:
-                                save_things(global_iteration, "_best")
+                                save_things("best")
 
-                        # if not args.nosave:
-                        # model.save(make_model_filename("latest"))
+                        if not args.nosave:
+                            save_things("latest")
 
                         val_loss_x.append(global_iteration)
                         val_loss_y.append(curr_val_mse)
@@ -436,7 +518,6 @@ def main():
                     ) == 0 or (global_iteration == 0)
 
                     if time_to_plot:
-                        # TODO: move this to a function to prevent memory leaks
                         model.eval()
 
                         print(
@@ -454,14 +535,11 @@ def main():
 
                         model.train()
 
-                    if ((global_iteration + 1) % 65536) == 0:
-                        save_things(global_iteration, "_latest")
-
                     global_iteration += 1
 
     except KeyboardInterrupt:
         print("\n\nControl-C detected, saving model...\n")
-        save_things(global_iteration, "_aborted")
+        save_things("aborted")
         print("Exiting")
         exit(1)
 

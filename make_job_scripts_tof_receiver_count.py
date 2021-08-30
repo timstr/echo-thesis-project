@@ -23,8 +23,8 @@ def make_script(tof_crop_size, x_count, y_count, z_count):
     source activate /home/timstr/echo_env
     cd /home/timstr/echo
 
-    export WAVESIM_DATASET_TRAIN=/project/st-rhodin-1/users/timstr/dataset_random_train.h5
-    export WAVESIM_DATASET_VALIDATION=/project/st-rhodin-1/users/timstr/dataset_random_val_small.h5
+    export WAVESIM_DATASET_TRAIN=/project/st-rhodin-1/users/timstr/dataset_7.5mm_random_train.h5
+    export WAVESIM_DATASET_VALIDATION=/project/st-rhodin-1/users/timstr/dataset_7.5mm_random_val.h5
     export TRAINING_LOG_PATH=/scratch/st-rhodin-1/users/timstr/echo/logs
     export TRAINING_MODEL_PATH=/scratch/st-rhodin-1/users/timstr/echo/models
     export MPLCONFIGDIR=/scratch/st-rhodin-1/users/timstr/matplotlib_junk
@@ -32,7 +32,7 @@ def make_script(tof_crop_size, x_count, y_count, z_count):
     echo "Starting training..."
     python3 train_time_of_flight_net.py \\
         --experiment={desc} \\
-        --batchsize=128 \\
+        --batchsize=32 \\
         --iterations=1000000 \\
         --tofcropsize={tof_crop_size} \\
         --samplesperexample=256 \\
@@ -40,7 +40,11 @@ def make_script(tof_crop_size, x_count, y_count, z_count):
         --validationinterval=4096 \\
         --receivercountx={x_count} \\
         --receivercounty={y_count} \\
-        --receivercountz={z_count}
+        --receivercountz={z_count} \\
+        --chirpf0=18000.0 \\
+        --chirpf1=22000.0 \\
+        --chirplen=0.001 \\
+        --validationdownsampling=4
 
     echo "Training completed."
     """
@@ -50,13 +54,12 @@ def make_script(tof_crop_size, x_count, y_count, z_count):
         f.write(contents)
 
 
-for tof_crop_size in [64, 128]:
-    for x_count in [2, 4]:
-        for y_count in [n for n in [2, 4] if n >= x_count]:
-            for z_count in [1, 2, 4]:
-                make_script(
-                    tof_crop_size=tof_crop_size,
-                    x_count=x_count,
-                    y_count=y_count,
-                    z_count=z_count,
-                )
+for tof_crop_size in [64, 128, 256]:
+    for xy_count in [2, 4]:
+        for z_count in [1, 2, 4]:
+            make_script(
+                tof_crop_size=tof_crop_size,
+                x_count=xy_count,
+                y_count=xy_count,
+                z_count=z_count,
+            )

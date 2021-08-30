@@ -34,7 +34,7 @@ def main():
         "--f0", type=float, dest="f0", help="chirp start frequency (Hz)", default=0.0
     )
     parser.add_argument(
-        "--f1", type=float, dest="f1", help="end frequency (Hz)", default=20_000.0
+        "--f1", type=float, dest="f1", help="chirp end frequency (Hz)", default=20_000.0
     )
     parser.add_argument(
         "--l", type=float, dest="l", help="chirp duration (seconds)", default=0.001

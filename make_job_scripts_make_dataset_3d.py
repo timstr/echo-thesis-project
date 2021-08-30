@@ -1,3 +1,4 @@
+from math import ceil, log10
 import textwrap
 import os
 
@@ -7,8 +8,9 @@ if not os.path.exists(out_folder):
     os.makedirs(out_folder)
 
 
-def make_script(mode, worker_index, num_workers, count):
-    desc = f"make_dataset_{mode}_{worker_index + 1}_of_{num_workers}"
+def make_script(mode, worker_index, num_workers, count, append):
+    worker_index_str = str(worker_index + 1).zfill(ceil(log10(num_workers)))
+    desc = f"make_dataset_{mode}_{worker_index_str}_of_{num_workers}"
     contents = f"""\
     #!/bin/bash
 
@@ -26,7 +28,7 @@ def make_script(mode, worker_index, num_workers, count):
     cd /home/timstr/echo
 
     export ECHO4CH_OBSTACLES=/project/st-rhodin-1/users/timstr/echo4ch_obstacles.h5
-    export DATASET_OUTPUT=/scratch/st-rhodin-1/users/timstr/echo/dataset_7.5mm_{mode}_{worker_index + 1}_of_{num_workers}.h5
+    export DATASET_OUTPUT=/scratch/st-rhodin-1/users/timstr/echo/dataset_7.5mm_{mode}_{worker_index_str}_of_{num_workers}.h5
     export KWAVE_EXECUTABLE=/home/timstr/k-wave/kspaceFirstOrder-CUDA/kspaceFirstOrder-CUDA
     export KWAVE_TEMP_FOLDER=/scratch/st-rhodin-1/users/timstr/echo/temp/{desc}
 
@@ -35,7 +37,8 @@ def make_script(mode, worker_index, num_workers, count):
         --numworkers={num_workers} \\
         --workerindex={worker_index} \\
         --mode={mode} \\
-        --count={count}
+        --count={count} \\
+        {'--append' if append else ''}
 
     echo "Dataset generation completed."
     """
@@ -45,9 +48,18 @@ def make_script(mode, worker_index, num_workers, count):
         f.write(contents)
 
 
-num_workers = 8
-for mode in ["random", "random-inner", "random-outer"]:
+append = True
+
+if append:
+    print("WARNING: jobs will append to existing datasets")
+
+num_workers = 20
+for mode, count in [("echo4ch", 6500)]:
     for worker_index in range(num_workers):
         make_script(
-            mode=mode, worker_index=worker_index, num_workers=num_workers, count=12000
+            mode=mode,
+            worker_index=worker_index,
+            num_workers=num_workers,
+            count=count,
+            append=append,
         )

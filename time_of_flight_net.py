@@ -85,7 +85,7 @@ class TimeOfFlightNet(nn.Module):
         #     nn.Linear(in_features=hidden_features, out_features=1),
         # )
 
-        conv_features = 32
+        conv_features = 128
         final_length = crop_length_samples // 8
         final_features = 8
         conv_kernel_size = 5

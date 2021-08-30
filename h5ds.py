@@ -31,6 +31,7 @@ class H5DS:
             maxshape = (None,) + self.shape
             chunks = (1,) + self.shape
         else:
+            assert value is not None
             shape = self.shape
             maxshape = self.shape
             chunks = self.shape
@@ -50,7 +51,8 @@ class H5DS:
             compression="gzip",
             compression_opts=9,
         )
-        ds[...] = value
+        if value is not None:
+            ds[...] = value
 
     def read(self, h5file, index=None):
         assert isinstance(h5file, h5py.File)
