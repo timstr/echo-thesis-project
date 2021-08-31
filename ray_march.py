@@ -90,7 +90,7 @@ def main():
         assert args.receivercountx is None
         assert args.receivercounty is None
         assert args.receivercountz is None
-        assert args.precompute is None
+        assert args.precompute == False
     else:
         prediction = True
         assert args.tofcropsize is not None
@@ -106,7 +106,46 @@ def main():
 
     dataset = WaveDataset3d(description, args.path_to_dataset)
 
+    raymarch_split_size = SplitSize("raymarch")
+
+    network_prediction_split_size = SplitSize("network_prediction")
+
+    if prediction:
+        sensor_indices = make_receiver_indices(
+            args.receivercountx,
+            args.receivercounty,
+            args.receivercountz,
+        )
+
+        the_model = TimeOfFlightNet(
+            speed_of_sound=description.air_properties.speed_of_sound,
+            sampling_frequency=description.output_sampling_frequency,
+            recording_length_samples=description.output_length,
+            crop_length_samples=args.tofcropsize,
+            emitter_location=description.emitter_location,
+            receiver_locations=description.sensor_locations[sensor_indices],
+        ).to("cuda")
+        restore_module(the_model, args.restoremodelpath)
+        the_model.eval()
+
+        fm_chirp = (
+            torch.tensor(
+                make_fm_chirp(
+                    begin_frequency_Hz=args.chirpf0,
+                    end_frequency_Hz=args.chirpf1,
+                    sampling_frequency=description.output_sampling_frequency,
+                    chirp_length_samples=math.ceil(
+                        args.chirplen * description.output_sampling_frequency
+                    ),
+                    wave="sine",
+                )
+            )
+            .float()
+            .to(the_device)
+        )
+
     for index in args.indices:
+        print(f"Rendering example {index}")
         example = dataset[index]
 
         # rm_camera_center = [0.0, 0.0, 0.0]
@@ -133,44 +172,7 @@ def main():
             < 1e-6
         )
 
-        raymarch_split_size = SplitSize("raymarch")
-
-        network_prediction_split_size = SplitSize("network_prediction")
-
         if prediction:
-            sensor_indices = make_receiver_indices(
-                args.receivercountx,
-                args.receivercounty,
-                args.receivercountz,
-            )
-
-            the_model = TimeOfFlightNet(
-                speed_of_sound=description.air_properties.speed_of_sound,
-                sampling_frequency=description.output_sampling_frequency,
-                recording_length_samples=description.output_length,
-                crop_length_samples=args.tofcropsize,
-                emitter_location=description.emitter_location,
-                receiver_locations=description.sensor_locations[sensor_indices],
-            ).to("cuda")
-            restore_module(the_model, args.restoremodelpath)
-            the_model.eval()
-
-            fm_chirp = (
-                torch.tensor(
-                    make_fm_chirp(
-                        begin_frequency_Hz=args.chirpf0,
-                        end_frequency_Hz=args.chirpf1,
-                        sampling_frequency=description.output_sampling_frequency,
-                        chirp_length_samples=math.ceil(
-                            args.chirplen * description.output_sampling_frequency
-                        ),
-                        wave="sine",
-                    )
-                )
-                .float()
-                .to(the_device)
-            )
-
             recordings_ir = example["sensor_recordings"][sensor_indices].to(the_device)
 
             recordings_fm = convolve_recordings(fm_chirp, recordings_ir, description)

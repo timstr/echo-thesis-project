@@ -1,8 +1,6 @@
-from genericpath import isfile
 import os
 import sys
 from argparse import ArgumentParser
-import glob
 
 from current_simulation_description import make_simulation_description
 from dataset3d import WaveDataset3d

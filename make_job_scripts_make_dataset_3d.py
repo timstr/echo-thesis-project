@@ -8,13 +8,13 @@ if not os.path.exists(out_folder):
     os.makedirs(out_folder)
 
 
-def make_script(mode, worker_index, num_workers, count, append):
+def make_script(mode, worker_index, num_workers, count):
     worker_index_str = str(worker_index + 1).zfill(ceil(log10(num_workers)))
     desc = f"make_dataset_{mode}_{worker_index_str}_of_{num_workers}"
     contents = f"""\
     #!/bin/bash
 
-    #PBS -l walltime=36:00:00,select=1:ncpus=4:ngpus=1:mem=16gb
+    #PBS -l walltime=5:00:00,select=1:ncpus=4:ngpus=1:mem=16gb
     #PBS -N {desc}
     #PBS -A st-rhodin-1-gpu
     #PBS -m abe
@@ -37,8 +37,7 @@ def make_script(mode, worker_index, num_workers, count, append):
         --numworkers={num_workers} \\
         --workerindex={worker_index} \\
         --mode={mode} \\
-        --count={count} \\
-        {'--append' if append else ''}
+        --count={count}
 
     echo "Dataset generation completed."
     """
@@ -48,18 +47,12 @@ def make_script(mode, worker_index, num_workers, count, append):
         f.write(contents)
 
 
-append = True
-
-if append:
-    print("WARNING: jobs will append to existing datasets")
-
 num_workers = 20
-for mode, count in [("echo4ch", 6500)]:
+for mode, count in [("orbiting-sphere", 1000)]:
     for worker_index in range(num_workers):
         make_script(
             mode=mode,
             worker_index=worker_index,
             num_workers=num_workers,
             count=count,
-            append=append,
         )

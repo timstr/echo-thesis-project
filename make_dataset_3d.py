@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import os
+import math
 from argparse import ArgumentParser
 
 from simulation_description import SimulationDescription
@@ -21,6 +22,7 @@ from current_simulation_description import (
 )
 from utils import assert_eq
 from tof_utils import obstacle_map_to_sdf
+from kwave_util import make_ball
 
 
 def make_inner_outer_partitions():
@@ -280,7 +282,35 @@ def main():
                 yield obs, mode
 
     elif mode == mode_orbiting_sphere:
-        raise Exception("orbiting-sphere mode is not implemented")
+        radius = math.ceil(0.05 / desc.dz)
+        margin = 4
+        min_x = minimum_x_units + margin + radius
+        min_y = margin + radius
+        min_z = margin + radius
+        max_x = desc.Nx - margin - radius
+        max_y = desc.Ny - margin - radius
+        max_z = desc.Nz - margin - radius
+
+        def obstacle_generator():
+            i = 0
+            while i < count:
+                t = i / count
+                print(t)
+                tx = 0.5 - 0.5 * math.sin(2.0 * math.pi * t)
+                ty = 0.5 - 0.5 * math.sin(4.0 * math.pi * t)
+                tz = 0.5 + 0.5 * math.cos(6.0 * math.pi * t)
+                ix = min_x + tx * (max_x - min_x)
+                iy = min_y + ty * (max_y - min_y)
+                iz = min_z + tz * (max_z - min_z)
+                obs = make_ball(desc.Nx, desc.Ny, desc.Nz, ix, iy, iz, radius)
+                yield obs, f"orbiting-sphere {i}/{count}"
+                i += 1
+
+        # HACK
+        for i, f in enumerate(obstacle_generator()):
+            pass
+        exit(0)
+
     elif mode == mode_echo4ch:
         echo4ch_obstacle_path = os.environ.get("ECHO4CH_OBSTACLES")
 

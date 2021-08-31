@@ -1112,19 +1112,19 @@ def _raymarch_sdf_impl(
 
         num_iterations = 64
         for i in range(num_iterations):
-            outside_x = torch.logical_or(
-                locations[0] < description.xmin, locations[0] > description.xmax
-            )
-            outside_y = torch.logical_or(
-                locations[1] < description.ymin, locations[1] > description.ymax
-            )
-            outside_z = torch.logical_or(
-                locations[2] < description.zmin, locations[2] > description.zmax
-            )
+            # outside_x = torch.logical_or(
+            #     locations[0] < description.xmin, locations[0] > description.xmax
+            # )
+            # outside_y = torch.logical_or(
+            #     locations[1] < description.ymin, locations[1] > description.ymax
+            # )
+            # outside_z = torch.logical_or(
+            #     locations[2] < description.zmin, locations[2] > description.zmax
+            # )
 
-            outside = torch.logical_or(
-                outside_x, torch.logical_or(outside_y, outside_z)
-            )
+            # outside = torch.logical_or(
+            #     outside_x, torch.logical_or(outside_y, outside_z)
+            # )
 
             original_locations = locations.clone()
 
@@ -1139,6 +1139,8 @@ def _raymarch_sdf_impl(
 
             # get SDF values at each ray location
             sampled_sdf_obstacles = _sample_obstacle_sdf(locations) + clamp_displacement
+
+            sampled_sdf_obstacles.nan_to_num_(nan=np.inf)
 
             sampled_sdf_axes = (
                 _simulation_boundary_sdf(description, original_locations, radius=0.001)
