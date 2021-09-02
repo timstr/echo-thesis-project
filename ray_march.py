@@ -6,6 +6,7 @@ import math
 from argparse import ArgumentParser
 import PIL
 
+from assert_eq import assert_eq
 from the_device import the_device
 from plot_utils import plt_screenshot
 from current_simulation_description import make_simulation_description, minimum_x_units
@@ -79,6 +80,13 @@ def main():
         default=False,
         action="store_true",
     )
+    parser.add_argument(
+        "--showsensor",
+        dest="showsensor",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument("--supersampling", type=int, dest="supersampling", default=None)
     args = parser.parse_args()
 
     if args.restoremodelpath is None:
@@ -87,9 +95,10 @@ def main():
         assert args.chirpf0 is None
         assert args.chirpf1 is None
         assert args.chirplen is None
-        assert args.receivercountx is None
-        assert args.receivercounty is None
-        assert args.receivercountz is None
+        if not args.showsensor:
+            assert args.receivercountx is None
+            assert args.receivercounty is None
+            assert args.receivercountz is None
         assert args.precompute == False
     else:
         prediction = True
@@ -97,10 +106,21 @@ def main():
         assert args.chirpf0 is not None
         assert args.chirpf1 is not None
         assert args.chirplen is not None
+        assert args.precompute is not None
         assert args.receivercountx is not None
         assert args.receivercounty is not None
         assert args.receivercountz is not None
-        assert args.precompute is not None
+
+    if args.showsensor:
+        assert args.receivercountx is not None
+        assert args.receivercounty is not None
+        assert args.receivercountz is not None
+
+    if args.supersampling is None:
+        supersampling = 1
+    else:
+        supersampling = args.supersampling
+        assert supersampling >= 1
 
     description = make_simulation_description()
 
@@ -110,12 +130,28 @@ def main():
 
     network_prediction_split_size = SplitSize("network_prediction")
 
-    if prediction:
-        sensor_indices = make_receiver_indices(
-            args.receivercountx,
-            args.receivercounty,
-            args.receivercountz,
+    sensor_indices = make_receiver_indices(
+        args.receivercountx,
+        args.receivercounty,
+        args.receivercountz,
+    )
+
+    if args.showsensor:
+        raymarch_emitter_location = torch.tensor(description.emitter_location).to(
+            the_device
         )
+        assert_eq(raymarch_emitter_location.shape, (3,))
+        raymarch_receiver_locations = (
+            torch.tensor(description.sensor_locations[sensor_indices])
+            .permute(1, 0)
+            .to(the_device)
+        )
+        assert_eq(raymarch_receiver_locations.shape, (3, len(sensor_indices)))
+    else:
+        raymarch_emitter_location = None
+        raymarch_receiver_locations = None
+
+    if prediction:
 
         the_model = TimeOfFlightNet(
             speed_of_sound=description.air_properties.speed_of_sound,
@@ -148,15 +184,19 @@ def main():
         print(f"Rendering example {index}")
         example = dataset[index]
 
-        # rm_camera_center = [0.0, 0.0, 0.0]
+        # rm_camera_center = [description.xmin - 0.01, 0.0, 0.0]
         # rm_camera_up = [0.0, 0.5 * description.Ny * description.dy, 0.0]
         # rm_camera_right = [0.0, 0.0, 0.5 * description.Nz * description.dz]
+        # rm_x_resolution = 512
+        # rm_y_resolution = 512
+        # rm_fov_deg = 30.0
 
         rm_camera_center = [-0.445, -0.4, 1.0]
         rm_camera_up = vector_normalize([-0.2, 1.0, 0.2], norm=0.6)
         rm_camera_right = vector_normalize([1.0, 0.0, 1.0], norm=1.2)
-        rm_x_resolution = 1024
-        rm_y_resolution = 512
+        rm_x_resolution = 1024 * 2
+        rm_y_resolution = 512 * 2
+        rm_fov_deg = 10.0
 
         # Make sure that camera directions are orthogonal
         assert (
@@ -186,15 +226,36 @@ def main():
                 y_steps = description.Ny
                 z_steps = description.Nz
 
-                sdf_pred = split_till_it_fits(
-                    split_network_prediction,
-                    network_prediction_split_size,
-                    model=the_model,
-                    locations=locations,
-                    recordings=recordings_fm,
-                    description=description,
-                    show_progress_bar=True,
+                offset = -0.5 * (supersampling - 1) / supersampling
+
+                sdf_pred_acc = torch.zeros(
+                    (x_steps * y_steps * z_steps,), device=the_device
                 )
+
+                for ss in range(supersampling ** 3):
+                    ss_i = ss // supersampling ** 2
+                    ss_j = ss // supersampling % supersampling
+                    ss_k = ss % supersampling
+
+                    ss_dx = description.dx * (offset + (ss_i / supersampling))
+                    ss_dy = description.dy * (offset + (ss_j / supersampling))
+                    ss_dz = description.dz * (offset + (ss_k / supersampling))
+
+                    locations_offset = locations + torch.tensor(
+                        [[ss_dx, ss_dy, ss_dz]], device=the_device
+                    )
+
+                    sdf_pred_acc += split_till_it_fits(
+                        split_network_prediction,
+                        network_prediction_split_size,
+                        model=the_model,
+                        locations=locations_offset,
+                        recordings=recordings_fm,
+                        description=description,
+                        show_progress_bar=True,
+                    )
+
+                sdf_pred = sdf_pred_acc / (supersampling ** 3)
                 sdf_pred = sdf_pred.reshape(x_steps, y_steps, z_steps)
 
                 obstacle_map = torch.zeros(
@@ -216,6 +277,9 @@ def main():
                     y_resolution=rm_y_resolution,
                     description=description,
                     obstacle_sdf=obstacle_sdf,
+                    emitter_location=raymarch_emitter_location,
+                    receiver_locations=raymarch_receiver_locations,
+                    field_of_view_degrees=rm_fov_deg,
                 )
             else:
                 img = split_till_it_fits(
@@ -229,6 +293,9 @@ def main():
                     description=description,
                     model=the_model,
                     recordings=recordings_fm,
+                    emitter_location=raymarch_emitter_location,
+                    receiver_locations=raymarch_receiver_locations,
+                    field_of_view_degrees=rm_fov_deg,
                 )
         else:
             obstacle_sdf = example["sdf"].cuda()
@@ -243,6 +310,9 @@ def main():
                 y_resolution=rm_y_resolution,
                 description=description,
                 obstacle_sdf=obstacle_sdf,
+                emitter_location=raymarch_emitter_location,
+                receiver_locations=raymarch_receiver_locations,
+                field_of_view_degrees=rm_fov_deg,
             )
 
         dataset_folder, dataset_name = os.path.split(args.path_to_dataset)
@@ -262,4 +332,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with torch.no_grad():
+        main()

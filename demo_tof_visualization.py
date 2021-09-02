@@ -6,8 +6,8 @@ import torch.nn as nn
 import math
 import numpy as np
 import scipy.fft as fft
-
 from argparse import ArgumentParser
+
 from current_simulation_description import make_simulation_description
 from tof_utils import (
     SplitSize,
@@ -74,6 +74,13 @@ class SimpleTOFPredictor(nn.Module):
             requires_grad=False,
         )
 
+        self.window_fn = nn.parameter.Parameter(
+            data=(
+                0.5 - 0.5 * torch.cos(torch.linspace(0.0, math.pi, crop_length_samples))
+            ).reshape(1, 1, 1, crop_length_samples),
+            requires_grad=False,
+        )
+
     def forward(self, recordings, sample_locations):
         recordings_cropped = time_of_flight_crop(
             recordings=recordings,
@@ -86,15 +93,20 @@ class SimpleTOFPredictor(nn.Module):
             # apply_amplitude_correction=True,
         )
 
-        recordings_cropped = sclog(recordings_cropped)
+        # recordings_cropped = sclog(recordings_cropped)
 
         B1, B2, R, L = recordings_cropped.shape
 
-        # magnitude = torch.sum(torch.sum(recordings_cropped, dim=2), dim=2)
+        recordings_windowed = recordings_cropped * self.window_fn
+
+        # magnitude = torch.sum(
+        #     torch.sum(recordings_windowed, dim=2),
+        #     dim=2,
+        # )
 
         magnitude = torch.mean(
-            torch.mean(torch.square(recordings_cropped), dim=2), dim=2
-        ) / (torch.mean(torch.var(recordings_cropped, dim=2), dim=2) + 1e-3)
+            torch.mean(torch.square(recordings_windowed), dim=2), dim=2
+        ) / (torch.mean(torch.var(recordings_windowed, dim=2), dim=2) + 1e-3)
 
         # magnitude = torch.sum(torch.square(torch.sum(recordings_cropped, dim=2)), dim=2)
 

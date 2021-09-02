@@ -55,11 +55,11 @@ def make_script(tof_crop_size, x_count, y_count, z_count):
 
 
 for tof_crop_size in [64, 128, 256]:
-    for xy_count in [2, 4]:
-        for z_count in [1, 2, 4]:
+    for x_count in [1, 2, 4]:
+        for yz_count in [2, 4]:
             make_script(
                 tof_crop_size=tof_crop_size,
-                x_count=xy_count,
-                y_count=xy_count,
-                z_count=z_count,
+                x_count=x_count,
+                y_count=yz_count,
+                z_count=yz_count,
             )
