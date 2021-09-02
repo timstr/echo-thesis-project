@@ -1,0 +1,3 @@
+[submodule "Batvision"]
+	path = Batvision
+	url = https://github.com/timstr/Batvision.git
