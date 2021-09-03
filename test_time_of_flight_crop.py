@@ -38,19 +38,15 @@ def main():
 
     recordings = example[k_sensor_recordings]
 
-    fm_chirp = torch.tensor(
-        make_fm_chirp(
-            begin_frequency_Hz=32_000.0,
-            end_frequency_Hz=0_000.0,
-            sampling_frequency=description.output_sampling_frequency,
-            chirp_length_samples=math.ceil(
-                0.001 * description.output_sampling_frequency
-            ),
-            wave="sine",
-        )
-    ).float()
+    fm_chirp = make_fm_chirp(
+        begin_frequency_Hz=32_000.0,
+        end_frequency_Hz=0_000.0,
+        sampling_frequency=description.output_sampling_frequency,
+        chirp_length_samples=math.ceil(0.001 * description.output_sampling_frequency),
+        wave="sine",
+    )
 
-    recordings = convolve_recordings(fm_chirp, recordings, description)
+    recordings = convolve_recordings(fm_chirp, recordings)
 
     plt.ion()
 

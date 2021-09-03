@@ -16,6 +16,7 @@ def make_fm_chirp(
     sampling_frequency,
     chirp_length_samples,
     wave="sine",
+    device="cpu",
 ):
     assert isinstance(begin_frequency_Hz, float)
     assert isinstance(end_frequency_Hz, float)
@@ -38,20 +39,18 @@ def make_fm_chirp(
         output[i] = a * math.sin(phase * math.tau)
     if wave == "square":
         output = -1.0 + 2.0 * np.round(0.5 + 0.5 * output)
-    return output
+    return torch.tensor(output, dtype=torch.float32, device=device)
 
 
-def convolve_recordings(fm_chirp, sensor_recordings, description):
+def convolve_recordings(fm_chirp, sensor_recordings):
     with torch.no_grad():
         assert isinstance(fm_chirp, torch.Tensor)
         assert isinstance(sensor_recordings, torch.Tensor)
-        assert isinstance(description, SimulationDescription)
         (L_chirp,) = fm_chirp.shape
         batch_mode = sensor_recordings.ndim == 3
         if not batch_mode:
             sensor_recordings = sensor_recordings.unsqueeze(0)
         B, R, L_recording = sensor_recordings.shape
-        assert_eq(L_recording, description.output_length)
         assert L_chirp <= L_recording
         sensor_recordings_padded = torch.cat(
             [

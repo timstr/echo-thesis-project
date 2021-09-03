@@ -195,17 +195,13 @@ def main():
         args.nz,
     )
 
-    chirp = torch.tensor(
-        make_fm_chirp(
-            begin_frequency_Hz=args.f0,
-            end_frequency_Hz=args.f1,
-            sampling_frequency=description.output_sampling_frequency,
-            chirp_length_samples=math.ceil(
-                args.l * description.output_sampling_frequency
-            ),
-            wave="sine",
-        )
-    ).float()
+    chirp = make_fm_chirp(
+        begin_frequency_Hz=args.f0,
+        end_frequency_Hz=args.f1,
+        sampling_frequency=description.output_sampling_frequency,
+        chirp_length_samples=math.ceil(args.l * description.output_sampling_frequency),
+        wave="sine",
+    )
 
     chirp = chirp.to(the_device)
 
@@ -219,7 +215,7 @@ def main():
 
     recordings_ir = example[k_sensor_recordings][sensor_indices].to(the_device)
 
-    recordings_chirp = convolve_recordings(chirp, recordings_ir, description)
+    recordings_chirp = convolve_recordings(chirp, recordings_ir)
     # recordings_chirp = recordings_ir
 
     obstacles = example[k_sdf].to(the_device)

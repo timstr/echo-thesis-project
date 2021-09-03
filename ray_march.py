@@ -163,20 +163,15 @@ def main():
         restore_module(the_model, args.restoremodelpath)
         the_model.eval()
 
-        fm_chirp = (
-            torch.tensor(
-                make_fm_chirp(
-                    begin_frequency_Hz=args.chirpf0,
-                    end_frequency_Hz=args.chirpf1,
-                    sampling_frequency=description.output_sampling_frequency,
-                    chirp_length_samples=math.ceil(
-                        args.chirplen * description.output_sampling_frequency
-                    ),
-                    wave="sine",
-                )
-            )
-            .float()
-            .to(the_device)
+        fm_chirp = make_fm_chirp(
+            begin_frequency_Hz=args.chirpf0,
+            end_frequency_Hz=args.chirpf1,
+            sampling_frequency=description.output_sampling_frequency,
+            chirp_length_samples=math.ceil(
+                args.chirplen * description.output_sampling_frequency
+            ),
+            wave="sine",
+            device=the_device,
         )
 
     for index in args.indices:
@@ -214,7 +209,7 @@ def main():
         if prediction:
             recordings_ir = example[k_sensor_recordings][sensor_indices].to(the_device)
 
-            recordings_fm = convolve_recordings(fm_chirp, recordings_ir, description)
+            recordings_fm = convolve_recordings(fm_chirp, recordings_ir)
 
             if args.precompute:
                 locations = all_grid_locations(

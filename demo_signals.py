@@ -33,20 +33,16 @@ def main():
 
     first_recording = dataset[args.index][k_sensor_recordings][0]
 
-    chirp = torch.tensor(
-        make_fm_chirp(
-            begin_frequency_Hz=args.f0,
-            end_frequency_Hz=args.f1,
-            sampling_frequency=description.output_sampling_frequency,
-            chirp_length_samples=math.ceil(
-                args.l * description.output_sampling_frequency
-            ),
-            wave="sine",
-        )
-    ).float()
+    chirp = make_fm_chirp(
+        begin_frequency_Hz=args.f0,
+        end_frequency_Hz=args.f1,
+        sampling_frequency=description.output_sampling_frequency,
+        chirp_length_samples=math.ceil(args.l * description.output_sampling_frequency),
+        wave="sine",
+    )
 
     first_recording_convolved = convolve_recordings(
-        chirp, first_recording.unsqueeze(0), description
+        chirp, first_recording.unsqueeze(0)
     ).squeeze(0)
 
     fig, axes = plt.subplots(5, 1, figsize=(8, 4), dpi=80)

@@ -1,3 +1,4 @@
+from assert_eq import assert_eq
 import fix_dead_command_line
 import cleanup_when_killed
 
@@ -40,6 +41,12 @@ def concat_images(img1, img2):
     return torchvision.utils.make_grid([img1, img2], nrow=2)
 
 
+model_tof_net = "tof_net"
+model_batvision_waveform = "batvision_waveform"
+model_batvision_spectrogram = "batvision_spectrogram"
+model_batgnet = "batg_net"
+
+
 def main():
     parser = ArgumentParser()
 
@@ -49,6 +56,19 @@ def main():
         dest="experiment",
         required=True,
         help="short description or mnemonic of reason for training, used in log files and model names",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        choices=[
+            model_tof_net,
+            model_batvision_waveform,
+            model_batvision_spectrogram,
+            model_batgnet,
+        ],
+        dest="model",
+        required=False,
+        default=model_tof_net,
     )
     parser.add_argument(
         "--batchsize",
@@ -61,7 +81,7 @@ def main():
         "--learningrate",
         type=float,
         dest="learningrate",
-        default=1e-3,
+        default=1e-4,
         help="optimizer learning rate",
     )
     parser.add_argument(
@@ -151,6 +171,11 @@ def main():
 
     assert (args.restoremodelpath is None) == (args.restoreoptimizerpath is None)
 
+    if args.model != model_tof_net:
+        assert_eq(args.receivercountx, 1)
+        assert_eq(args.receivercounty, 2)
+        assert_eq(args.receivercountz, 2)
+
     sensor_indices = make_receiver_indices(
         args.receivercountx,
         args.receivercounty,
@@ -204,20 +229,15 @@ def main():
         collate_fn=collate_fn_device,
     )
 
-    fm_chirp = (
-        torch.tensor(
-            make_fm_chirp(
-                begin_frequency_Hz=args.chirpf0,
-                end_frequency_Hz=args.chirpf1,
-                sampling_frequency=description.output_sampling_frequency,
-                chirp_length_samples=math.ceil(
-                    args.chirplen * description.output_sampling_frequency
-                ),
-                wave="sine",
-            )
-        )
-        .float()
-        .to(the_device)
+    fm_chirp = make_fm_chirp(
+        begin_frequency_Hz=args.chirpf0,
+        end_frequency_Hz=args.chirpf1,
+        sampling_frequency=description.output_sampling_frequency,
+        chirp_length_samples=math.ceil(
+            args.chirplen * description.output_sampling_frequency
+        ),
+        wave="sine",
+        device=the_device,
     )
 
     validation_splits = SplitSize("compute_validation_metrics")
@@ -244,9 +264,7 @@ def main():
                 sdf_gt = sdf_gt.reshape(x_steps, y_steps, z_steps)
                 recordings_ir = dd[k_sensor_recordings][sensor_indices].to(the_device)
 
-                recordings_fm = convolve_recordings(
-                    fm_chirp, recordings_ir, description
-                )
+                recordings_fm = convolve_recordings(fm_chirp, recordings_ir)
 
                 sdf_pred = split_till_it_fits(
                     split_network_prediction,
@@ -303,7 +321,6 @@ def main():
         plot_recordings_train = convolve_recordings(
             fm_chirp=fm_chirp,
             sensor_recordings=batch_gpu[k_sensor_recordings][0, sensor_indices],
-            description=description,
         )
 
         slices_train_pred = split_till_it_fits(
@@ -336,7 +353,6 @@ def main():
         plot_recordings_val = convolve_recordings(
             fm_chirp=fm_chirp,
             sensor_recordings=val_batch_gpu[k_sensor_recordings][0, sensor_indices],
-            description=description,
         )
         slices_val_pred = split_till_it_fits(
             render_slices_prediction,
@@ -437,9 +453,8 @@ def main():
                     sensor_recordings_ir = batch_gpu[k_sensor_recordings][
                         :, sensor_indices
                     ]
-
                     sensor_recordings_fm = convolve_recordings(
-                        fm_chirp, sensor_recordings_ir, description
+                        fm_chirp, sensor_recordings_ir
                     )
 
                     sdf = batch_gpu[k_sdf]
