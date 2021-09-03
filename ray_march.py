@@ -6,28 +6,27 @@ import math
 from argparse import ArgumentParser
 import PIL
 
-from assert_eq import assert_eq
-from the_device import the_device
-from plot_utils import plt_screenshot
-from current_simulation_description import make_simulation_description, minimum_x_units
-from dataset3d import WaveDataset3d
-from time_of_flight_net import TimeOfFlightNet
-from tof_utils import (
-    SplitSize,
-    all_grid_locations,
-    convolve_recordings,
-    make_fm_chirp,
-    make_receiver_indices,
-    obstacle_map_to_sdf,
+from network_utils import split_network_prediction
+from visualization import (
     raymarch_sdf_ground_truth,
     raymarch_sdf_prediction,
-    restore_module,
-    split_network_prediction,
-    split_till_it_fits,
     vector_cross,
     vector_length,
     vector_normalize,
 )
+from signals_and_geometry import convolve_recordings, make_fm_chirp, obstacle_map_to_sdf
+from split_till_it_fits import SplitSize, split_till_it_fits
+from assert_eq import assert_eq
+from the_device import the_device
+from current_simulation_description import (
+    all_grid_locations,
+    make_receiver_indices,
+    make_simulation_description,
+    minimum_x_units,
+)
+from dataset3d import WaveDataset3d
+from time_of_flight_net import TimeOfFlightNet
+from torch_utils import restore_module
 
 
 def main():

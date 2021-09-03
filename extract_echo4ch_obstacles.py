@@ -6,7 +6,7 @@ import numpy as np
 import PIL.Image as Image
 
 from h5ds import H5DS
-from tof_utils import progress_bar
+from utils import progress_bar
 
 
 def main():

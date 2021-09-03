@@ -33,8 +33,3 @@ def progress_bar(current, total):
     end_of_line = "\n" if (i == total) else ""
     sys.stdout.write("\r[%-50s] %d/%d%s" % (bar_fill, i, total, end_of_line))
     sys.stdout.flush()
-
-
-def assert_eq(actual, expected):
-    if not (actual == expected):
-        raise Exception(f"Expected {expected}, but got {actual} instead")

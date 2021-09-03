@@ -5,7 +5,7 @@ import torch
 
 from current_simulation_description import make_simulation_description
 from dataset3d import WaveDataset3d
-from tof_utils import time_of_flight_crop
+from signals_and_geometry import time_of_flight_crop
 
 
 def main():

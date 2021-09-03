@@ -2,28 +2,15 @@ import fix_dead_command_line
 
 import matplotlib.pyplot as plt
 import torch
-import torch.nn as nn
 import math
 import numpy as np
 import scipy.fft as fft
-
 from argparse import ArgumentParser
+
 from current_simulation_description import make_simulation_description
-from tof_utils import (
-    SplitSize,
-    convolve_recordings,
-    make_fm_chirp,
-    make_receiver_indices,
-    render_slices_prediction,
-    render_slices_ground_truth,
-    split_till_it_fits,
-    time_of_flight_crop,
-    colourize_sdf,
-)
-from utils import assert_eq, is_power_of_2
 from dataset3d import WaveDataset3d
 from the_device import the_device
-from time_of_flight_net import sclog
+from signals_and_geometry import make_fm_chirp, convolve_recordings
 
 
 def main():

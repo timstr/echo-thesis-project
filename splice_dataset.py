@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from current_simulation_description import make_simulation_description
 from dataset3d import WaveDataset3d
 from utils import progress_bar
-from tof_utils import obstacle_map_to_sdf
+from signals_and_geometry import obstacle_map_to_sdf
 
 
 def main(

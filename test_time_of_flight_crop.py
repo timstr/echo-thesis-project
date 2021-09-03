@@ -7,8 +7,7 @@ import torch
 
 from current_simulation_description import make_simulation_description
 from dataset3d import WaveDataset3d
-from tof_utils import convolve_recordings, make_fm_chirp, time_of_flight_crop
-from time_of_flight_net import sclog
+from signals_and_geometry import convolve_recordings, make_fm_chirp, time_of_flight_crop
 
 
 def main():

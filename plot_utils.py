@@ -1,12 +1,4 @@
-import PIL
 import numpy as np
-
-
-def plt_screenshot(plt_figure):
-    pil_img = PIL.Image.frombytes(
-        "RGB", plt_figure.canvas.get_width_height(), plt_figure.canvas.tostring_rgb()
-    )
-    return pil_img
 
 
 class LossPlotter:

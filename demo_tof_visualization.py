@@ -5,25 +5,23 @@ import torch
 import torch.nn as nn
 import math
 import numpy as np
-import scipy.fft as fft
 from argparse import ArgumentParser
 
-from current_simulation_description import make_simulation_description
-from tof_utils import (
-    SplitSize,
-    convolve_recordings,
-    make_fm_chirp,
+from current_simulation_description import (
     make_receiver_indices,
-    render_slices_prediction,
-    render_slices_ground_truth,
-    split_till_it_fits,
-    time_of_flight_crop,
-    colourize_sdf,
+    make_simulation_description,
 )
-from utils import assert_eq, is_power_of_2
+from assert_eq import assert_eq
+from utils import is_power_of_2
 from dataset3d import WaveDataset3d
 from the_device import the_device
-from time_of_flight_net import sclog
+from split_till_it_fits import SplitSize, split_till_it_fits
+from visualization import (
+    colourize_sdf,
+    render_slices_ground_truth,
+    render_slices_prediction,
+)
+from signals_and_geometry import convolve_recordings, make_fm_chirp, time_of_flight_crop
 
 
 class SimpleTOFPredictor(nn.Module):

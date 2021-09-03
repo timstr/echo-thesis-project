@@ -1,16 +1,17 @@
-from profiling import Timer
 import fix_dead_command_line
 
 import torch
 import torchvision
 import matplotlib.pyplot as plt
+from visualization import colourize_sdf
+from signals_and_geometry import obstacle_map_to_sdf
+from profiling import Timer
 
 from current_simulation_description import (
     make_simulation_description,
     make_random_obstacles,
 )
-from tof_utils import obstacle_map_to_sdf, colourize_sdf
-from utils import assert_eq
+from assert_eq import assert_eq
 
 
 def slice_and_plot(tensor, description, plt_axis, colour_fn=None):

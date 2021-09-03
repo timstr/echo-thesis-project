@@ -3,10 +3,10 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from utils import assert_eq, is_power_of_2
+from utils import is_power_of_2
+from assert_eq import assert_eq
 from reshape_layer import Reshape
-from tof_utils import time_of_flight_crop
-
+from signals_and_geometry import time_of_flight_crop
 
 # signed, clipped logarithm
 def sclog(t):

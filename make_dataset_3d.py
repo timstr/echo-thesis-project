@@ -20,9 +20,9 @@ from current_simulation_description import (
     Ny,
     Nz,
 )
-from utils import assert_eq
-from tof_utils import obstacle_map_to_sdf
+from assert_eq import assert_eq
 from kwave_util import make_ball
+from signals_and_geometry import obstacle_map_to_sdf
 
 
 def make_inner_outer_partitions():

@@ -6,41 +6,34 @@ import torch
 import torch.nn as nn
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
-
 import numpy as np
-
 import os
 import datetime
 from argparse import ArgumentParser
 
+from torch_utils import restore_module, save_module
 from the_device import the_device
 from device_dict import DeviceDict
 from dataset3d import WaveDataset3d
 from time_of_flight_net import TimeOfFlightNet
-from tof_utils import (
-    SplitSize,
-    all_grid_locations,
-    colourize_sdf,
-    make_fm_chirp,
-    convolve_recordings,
-    evaluate_prediction,
-    make_random_training_locations,
-    make_receiver_indices,
-    render_slices_ground_truth,
-    render_slices_prediction,
-    restore_module,
-    sample_obstacle_map,
-    save_module,
-    split_network_prediction,
-    split_till_it_fits,
-)
+from network_utils import evaluate_prediction, split_network_prediction
 from utils import progress_bar
 from current_simulation_description import (
+    all_grid_locations,
+    make_random_training_locations,
+    make_receiver_indices,
     make_simulation_description,
     minimum_x_units,
+    sample_obstacle_map,
 )
-from plot_utils import LossPlotter, plt_screenshot
 from torch.utils.data._utils.collate import default_collate
+from signals_and_geometry import convolve_recordings, make_fm_chirp
+from split_till_it_fits import SplitSize, split_till_it_fits
+from visualization import (
+    colourize_sdf,
+    render_slices_ground_truth,
+    render_slices_prediction,
+)
 
 
 def concat_images(img1, img2):
@@ -121,13 +114,6 @@ def main():
         default=False,
         action="store_true",
         help="do not save model files",
-    )
-    parser.add_argument(
-        "--raymarch",
-        dest="raymarch",
-        default=False,
-        action="store_true",
-        help="when plotting, render raymarched 3D images",
     )
     parser.add_argument(
         "--plotinterval",
@@ -438,9 +424,6 @@ def main():
             sdf_slice_prediction_splits = SplitSize("SDF slice prediction")
 
             num_epochs = 1000000
-            train_loss_plotter = LossPlotter(
-                aggregation_interval=256, colour=(0.0, 0.0, 1.0), num_quantiles=10
-            )
             val_loss_y = []
             val_loss_x = []
             best_val_mse = np.inf
@@ -481,8 +464,6 @@ def main():
                     optimizer.step()
 
                     loss = loss.item()
-
-                    train_loss_plotter.append(loss)
 
                     writer.add_scalar("training loss", loss, global_iteration)
 
