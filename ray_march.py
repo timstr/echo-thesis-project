@@ -24,7 +24,7 @@ from current_simulation_description import (
     make_simulation_description,
     minimum_x_units,
 )
-from dataset3d import WaveDataset3d
+from dataset3d import WaveDataset3d, k_sensor_recordings, k_sdf
 from time_of_flight_net import TimeOfFlightNet
 from torch_utils import restore_module
 
@@ -212,7 +212,7 @@ def main():
         )
 
         if prediction:
-            recordings_ir = example["sensor_recordings"][sensor_indices].to(the_device)
+            recordings_ir = example[k_sensor_recordings][sensor_indices].to(the_device)
 
             recordings_fm = convolve_recordings(fm_chirp, recordings_ir, description)
 
@@ -297,7 +297,7 @@ def main():
                     field_of_view_degrees=rm_fov_deg,
                 )
         else:
-            obstacle_sdf = example["sdf"].cuda()
+            obstacle_sdf = example[k_sdf].cuda()
 
             img = split_till_it_fits(
                 raymarch_sdf_ground_truth,

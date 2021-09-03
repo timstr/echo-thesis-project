@@ -8,7 +8,7 @@ import scipy.fft as fft
 from argparse import ArgumentParser
 
 from current_simulation_description import make_simulation_description
-from dataset3d import WaveDataset3d
+from dataset3d import WaveDataset3d, k_sensor_recordings
 from the_device import the_device
 from signals_and_geometry import make_fm_chirp, convolve_recordings
 
@@ -31,7 +31,7 @@ def main():
     description = make_simulation_description()
     dataset = WaveDataset3d(description, args.path_to_dataset)
 
-    first_recording = dataset[args.index]["sensor_recordings"][0]
+    first_recording = dataset[args.index][k_sensor_recordings][0]
 
     chirp = torch.tensor(
         make_fm_chirp(

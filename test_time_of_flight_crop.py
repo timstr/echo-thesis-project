@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import torch
 
 from current_simulation_description import make_simulation_description
-from dataset3d import WaveDataset3d
+from dataset3d import WaveDataset3d, k_sensor_recordings, k_obstacles
 from signals_and_geometry import convolve_recordings, make_fm_chirp, time_of_flight_crop
 
 
@@ -26,7 +26,7 @@ def main():
 
     example = dataset[dataset_index]
 
-    obstacles = example["obstacles"]
+    obstacles = example[k_obstacles]
 
     z_index = description.Nz // 2
 
@@ -36,7 +36,7 @@ def main():
     for z in range(description.Nz):
         obstacles_depthmap[obstacles[:, :, z]] = z / (description.Nz - 1)
 
-    recordings = example["sensor_recordings"]
+    recordings = example[k_sensor_recordings]
 
     fm_chirp = torch.tensor(
         make_fm_chirp(

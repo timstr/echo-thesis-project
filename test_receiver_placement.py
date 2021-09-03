@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 
 from current_simulation_description import make_simulation_description
-from dataset3d import WaveDataset3d
+from dataset3d import WaveDataset3d, k_sensor_recordings
 from signals_and_geometry import time_of_flight_crop
 
 
@@ -20,7 +20,7 @@ def main():
 
     example = dataset[3]
 
-    recordings = example["sensor_recordings"]
+    recordings = example[k_sensor_recordings]
 
     crop_size = 128
 

@@ -9,6 +9,10 @@ from h5ds import H5DS
 from simulation_description import SimulationDescription
 from device_dict import DeviceDict
 
+k_sensor_recordings = "sensor_recordings"
+k_sdf = "sdf"
+k_obstacles = "obstacles"
+
 
 class WaveDataset3d(torch.utils.data.Dataset):
     def __init__(self, description, path_to_h5file, write=False):
@@ -259,7 +263,7 @@ class WaveDataset3d(torch.utils.data.Dataset):
         sdf = torch.clamp(sdf, max=0.1)
 
         return DeviceDict(
-            {"sensor_recordings": sensor_recordings, "obstacles": obstacles, "sdf": sdf}
+            {k_sensor_recordings: sensor_recordings, k_obstacles: obstacles, k_sdf: sdf}
         )
 
     def contains(self, obstacles):

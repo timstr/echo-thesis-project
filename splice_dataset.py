@@ -3,7 +3,7 @@ import sys
 from argparse import ArgumentParser
 
 from current_simulation_description import make_simulation_description
-from dataset3d import WaveDataset3d
+from dataset3d import WaveDataset3d, k_sensor_recordings, k_sdf, k_obstacles
 from utils import progress_bar
 from signals_and_geometry import obstacle_map_to_sdf
 
@@ -69,12 +69,12 @@ def main(
                 )
                 for i in range(current_start_index, current_end_index_inclusive + 1):
                     dd = input_ds[i]
-                    recordings = dd["sensor_recordings"]
-                    obstacles = dd["obstacles"]
+                    recordings = dd[k_sensor_recordings]
+                    obstacles = dd[k_obstacles]
                     if recompute_sdf:
                         sdf = obstacle_map_to_sdf(obstacles.cuda(), desc).cpu()
                     else:
-                        sdf = dd["sdf"]
+                        sdf = dd[k_sdf]
                     was_added = output_ds.append_to_dataset(
                         obstacles=obstacles,
                         recordings=recordings,

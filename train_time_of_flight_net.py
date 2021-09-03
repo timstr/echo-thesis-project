@@ -14,7 +14,7 @@ from argparse import ArgumentParser
 from torch_utils import restore_module, save_module
 from the_device import the_device
 from device_dict import DeviceDict
-from dataset3d import WaveDataset3d
+from dataset3d import WaveDataset3d, k_sensor_recordings, k_obstacles, k_sdf
 from time_of_flight_net import TimeOfFlightNet
 from network_utils import evaluate_prediction, split_network_prediction
 from utils import progress_bar
@@ -237,12 +237,12 @@ def main():
             N = len(dataset_val)
             for i, dd in enumerate(dataset_val):
                 sdf_gt = sample_obstacle_map(
-                    obstacle_map_batch=dd["sdf"].unsqueeze(0).to(the_device),
+                    obstacle_map_batch=dd[k_sdf].unsqueeze(0).to(the_device),
                     locations_xyz_batch=locations.unsqueeze(0),
                     description=description,
                 )
                 sdf_gt = sdf_gt.reshape(x_steps, y_steps, z_steps)
-                recordings_ir = dd["sensor_recordings"][sensor_indices].to(the_device)
+                recordings_ir = dd[k_sensor_recordings][sensor_indices].to(the_device)
 
                 recordings_fm = convolve_recordings(
                     fm_chirp, recordings_ir, description
@@ -292,7 +292,7 @@ def main():
 
         # plot the ground truth obstacles
         slices_train_gt = render_slices_ground_truth(
-            batch_gpu["sdf"][0],
+            batch_gpu[k_sdf][0],
             description,
             locations=locations[0].to(the_device),
             colour_function=colourize_sdf,
@@ -302,7 +302,7 @@ def main():
 
         plot_recordings_train = convolve_recordings(
             fm_chirp=fm_chirp,
-            sensor_recordings=batch_gpu["sensor_recordings"][0, sensor_indices],
+            sensor_recordings=batch_gpu[k_sensor_recordings][0, sensor_indices],
             description=description,
         )
 
@@ -326,7 +326,7 @@ def main():
         )
 
         slices_val_gt = render_slices_ground_truth(
-            val_batch_gpu["sdf"][0],
+            val_batch_gpu[k_sdf][0],
             description,
             colour_function=colourize_sdf,
         )
@@ -335,7 +335,7 @@ def main():
 
         plot_recordings_val = convolve_recordings(
             fm_chirp=fm_chirp,
-            sensor_recordings=val_batch_gpu["sensor_recordings"][0, sensor_indices],
+            sensor_recordings=val_batch_gpu[k_sensor_recordings][0, sensor_indices],
             description=description,
         )
         slices_val_pred = split_till_it_fits(
@@ -434,7 +434,7 @@ def main():
                     batch_cpu = next(train_iter)
                     batch_gpu = batch_cpu.to(the_device)
 
-                    sensor_recordings_ir = batch_gpu["sensor_recordings"][
+                    sensor_recordings_ir = batch_gpu[k_sensor_recordings][
                         :, sensor_indices
                     ]
 
@@ -442,7 +442,7 @@ def main():
                         fm_chirp, sensor_recordings_ir, description
                     )
 
-                    sdf = batch_gpu["sdf"]
+                    sdf = batch_gpu[k_sdf]
 
                     locations = make_random_training_locations(
                         sdf,

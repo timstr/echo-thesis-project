@@ -3,7 +3,7 @@ import sys
 import glob
 
 from current_simulation_description import make_simulation_description
-from dataset3d import WaveDataset3d
+from dataset3d import WaveDataset3d, k_sensor_recordings, k_obstacles, k_sdf
 from utils import progress_bar
 
 
@@ -35,9 +35,9 @@ def main(output_path, part_base_path, num_parts, append):
                 N_examples = len(old_ds)
                 for i_example, example_dd in enumerate(old_ds):
                     progress_bar(i_example, N_examples)
-                    obs = example_dd["obstacles"]
-                    rec = example_dd["sensor_recordings"]
-                    sdf = example_dd["sdf"]
+                    obs = example_dd[k_obstacles]
+                    rec = example_dd[k_sensor_recordings]
+                    sdf = example_dd[k_sdf]
                     new_ds.append_to_dataset(obstacles=obs, recordings=rec, sdf=sdf)
                 print(f"{len(new_ds)} total examples")
 
