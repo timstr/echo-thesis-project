@@ -60,7 +60,7 @@ def wavesim_to_batvision_waveform(dd):
 
 # batvision spectrogram input
 # dd{audio} => {spectrograms}, assert 4 channels, compute 4x RGB spectrogram
-to_spectrogram = torchaudio.transforms.Spectrogram(
+to_spectrogram_batvision = torchaudio.transforms.Spectrogram(
     n_fft=430,
     win_length=64,
     hop_length=6,
@@ -77,17 +77,21 @@ def wavesim_to_batvision_spectrogram(dd):
     B, C, L = audio.shape
     assert_eq(C, 4)
     assert_eq(L, 2048)
-    spectrogram = to_spectrogram(audio)
-    assert_eq(spectrogram.shape, (B, 4, 216, 342))
-    spectrogram = spectrogram[:, :, :, :334]
-    spectrogram = torch.log(torch.clamp(torch.abs(spectrogram), min=1e-12))
-    vmin = torch.min(spectrogram)
-    vmax = torch.max(spectrogram)
-    spectrogram = (spectrogram - vmin) / (vmax - vmin)
-    assert_eq(spectrogram.shape, (B, 4, 216, 334))
+    spectrograms = to_spectrogram_batvision(audio)
+    assert_eq(spectrograms.shape, (B, 4, 216, 342))
+    spectrograms = spectrograms[:, :, :, :334]
+    spectrograms = torch.log(torch.clamp(torch.abs(spectrograms), min=1e-12))
+    vmin = torch.min(torch.min(spectrograms, dim=-1)[0], dim=-1)[0]
+    vmax = torch.max(torch.max(spectrograms, dim=-1)[0], dim=-1)[0]
+    assert_eq(vmin.shape, (B, 4))
+    assert_eq(vmax.shape, (B, 4))
+    vmin = vmin.reshape(B, 4, 1, 1)
+    vmax = vmax.reshape(B, 4, 1, 1)
+    spectrograms = (spectrograms - vmin) / (vmax - vmin)
+    assert_eq(spectrograms.shape, (B, 4, 216, 334))
     if not batch_mode:
-        spectrogram = spectrogram.squeeze(0)
-    return spectrogram
+        spectrograms = spectrograms.squeeze(0)
+    return spectrograms
 
 
 # batvision depthmap output
@@ -100,8 +104,6 @@ def wavesim_to_batvision_depthmap(dd):
         obstacles = obstacles.unsqueeze(0)
     B = obstacles.shape[0]
     assert_eq(obstacles.shape, (B, Nx, Ny, Nz))
-
-    roi = obstacles[:, minimum_x_units:]
 
     depthmap = torch.ones((B, Ny, Nz), device=obstacles.device)
 
@@ -126,57 +128,82 @@ def wavesim_to_batvision_depthmap(dd):
 
 # batgnet spectrogram input
 # dd{audio} => dd{spectrograms}, assert 4 channels, compute 4x long window spectrograms and 4x short window spectrograms, resample to 256x256
+to_spectrogram_batgnet_sw = torchaudio.transforms.Spectrogram(
+    n_fft=512,
+    win_length=64,
+    hop_length=8,
+    window_fn=torch.hann_window,
+)
+to_spectrogram_batgnet_lw = torchaudio.transforms.Spectrogram(
+    n_fft=512,
+    win_length=256,
+    hop_length=8,
+    window_fn=torch.hann_window,
+)
+
+
 def wavesim_to_batgnet_spectrogram(dd):
     assert isinstance(dd, DeviceDict)
-    # TODO
-    pass
+    audio = dd[k_sensor_recordings]
+    batch_mode = audio.ndim == 3
+    if not batch_mode:
+        audio = audio.unsqueeze(0)
+    B, C, L = audio.shape
+    assert_eq(C, 4)
+    assert_eq(L, 2048)
+    spectrogram_lw = to_spectrogram_batgnet_lw(audio)
+    assert_eq(spectrogram_lw.shape, (B, 4, 257, 257))
+    spectrogram_sw = to_spectrogram_batgnet_sw(audio)
+    assert_eq(spectrogram_sw.shape, (B, 4, 257, 257))
+    spectrogram_lw = spectrogram_lw[:, :, :256, :256]
+    spectrogram_sw = spectrogram_sw[:, :, :256, :256]
+    spectrogram_lw = torch.log(torch.clamp(torch.abs(spectrogram_lw), min=1e-12))
+    spectrogram_sw = torch.log(torch.clamp(torch.abs(spectrogram_sw), min=1e-12))
+    spectrograms = torch.cat([spectrogram_sw, spectrogram_lw], dim=1)
+    vmin = torch.min(torch.min(spectrograms, dim=-1)[0], dim=-1)[0]
+    vmax = torch.max(torch.max(spectrograms, dim=-1)[0], dim=-1)[0]
+    assert_eq(vmin.shape, (B, 8))
+    assert_eq(vmax.shape, (B, 8))
+    vmin = vmin.reshape(B, 8, 1, 1)
+    vmax = vmax.reshape(B, 8, 1, 1)
+    spectrograms = (spectrograms - vmin) / (vmax - vmin)
+    assert_eq(spectrograms.shape, (B, 8, 256, 256))
+    if not batch_mode:
+        spectrograms = spectrograms.squeeze(0)
+    return spectrograms
 
 
 # batgnet occupancy output
 # dd{obstacles} => dd{obstacles}, resample ROI to 64x64x64, back-fill
 def wavesim_to_batgnet_occupancy(dd):
     assert isinstance(dd, DeviceDict)
-    # TODO
-    pass
+    obstacles = dd[k_obstacles]
+    batch_mode = obstacles.ndim == 4
+    if not batch_mode:
+        obstacles = obstacles.unsqueeze(0)
+    B = obstacles.shape[0]
+    assert_eq(obstacles.shape, (B, Nx, Ny, Nz))
 
+    roi = obstacles[:, minimum_x_units:]
 
-# TODO: remove after testing
-if __name__ == "__main__":
-    import math
-    import matplotlib.pyplot as plt
-    from current_simulation_description import make_receiver_indices
-    from signals_and_geometry import convolve_recordings, make_fm_chirp
-    from dataset3d import WaveDataset3d
-    from current_simulation_description import make_simulation_description
-
-    desc = make_simulation_description()
-    fm_chirp = make_fm_chirp(
-        begin_frequency_Hz=18_000.0,
-        end_frequency_Hz=22_000.0,
-        sampling_frequency=desc.output_sampling_frequency,
-        chirp_length_samples=math.ceil(0.001 * desc.output_sampling_frequency),
-        wave="sine",
+    occupancy = (
+        F.interpolate(
+            roi.unsqueeze(1).float(),
+            size=(64, 64, 64),
+            mode="trilinear",
+            align_corners=False,
+        ).squeeze(1)
+        > 0.5
     )
-    sensor_indices = make_receiver_indices(num_x=1, num_y=2, num_z=2)
-    with WaveDataset3d(desc, "dataset_7.5mm_random_smol.h5") as ds:
-        dd = ds[9]
 
-        dd = subset_recordings_dict(dd, sensor_indices)
-        dd = convolve_recordings_dict(dd, fm_chirp)
+    assert_eq(occupancy.shape, (B, 64, 64, 64))
 
-        audio_resampled = wavesim_to_batvision_waveform(dd)
-        print(f"batvision waveform:\n    {audio_resampled.shape}")
+    mask = torch.zeros((B, 64, 64), dtype=torch.bool, device=obstacles.device)
 
-        for i in range(4):
-            plt.plot(audio_resampled[i])
-        plt.show()
+    for x in range(64):
+        mask.logical_or_(occupancy[:, x])
+        occupancy[:, x] = mask
 
-        spectrogram = wavesim_to_batvision_spectrogram(dd)
-        print(f"batvision spectrogram:\n    {spectrogram.shape}")
-        plt.imshow(spectrogram[:3].permute(1, 2, 0))
-        plt.show()
-
-        depthmap = wavesim_to_batvision_depthmap(dd)
-        print(f"batvision depthmap:\n    {depthmap.shape}")
-        plt.imshow(depthmap, cmap="gray")
-        plt.show()
+    if not batch_mode:
+        occupancy = occupancy.squeeze(0)
+    return occupancy
