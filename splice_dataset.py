@@ -1,7 +1,8 @@
+from make_dataset_3d import middle_is_empty, outside_is_empty
 import os
-import sys
 from argparse import ArgumentParser
 
+from which_device import get_compute_device
 from current_simulation_description import make_simulation_description
 from dataset3d import WaveDataset3d, k_sensor_recordings, k_sdf, k_obstacles
 from utils import progress_bar
@@ -16,6 +17,7 @@ def main(
     append,
     recompute_sdf,
     skip_duplicates,
+    filter_fn,
 ):
     assert isinstance(input_paths, list)
     assert len(input_paths) > 0
@@ -50,6 +52,7 @@ def main(
     with WaveDataset3d(desc, output_path, write=True) as output_ds:
         for current_input_path in input_paths:
             num_duplicates = 0
+            num_skipped = 0
             with WaveDataset3d(desc, current_input_path) as input_ds:
                 n = len(input_ds)
                 if start_index is not None:
@@ -71,8 +74,13 @@ def main(
                     dd = input_ds[i]
                     recordings = dd[k_sensor_recordings]
                     obstacles = dd[k_obstacles]
+                    if not filter_fn(obstacles):
+                        num_skipped += 1
+                        continue
                     if recompute_sdf:
-                        sdf = obstacle_map_to_sdf(obstacles.cuda(), desc).cpu()
+                        sdf = obstacle_map_to_sdf(
+                            obstacles.to(get_compute_device()), desc
+                        ).cpu()
                     else:
                         sdf = dd[k_sdf]
                     was_added = output_ds.append_to_dataset(
@@ -88,19 +96,22 @@ def main(
                         current_end_index_inclusive + 1 - current_start_index,
                     )
 
+            print("\n")
             print(
                 f"{num_duplicates} duplicate{' was' if num_duplicates == 1 else 's were'} skipped."
             )
+            print(
+                f"{num_skipped} example{' was' if num_skipped == 1 else 's were'} filtered out."
+            )
+            print("\n")
         n_out = len(output_ds)
         print(f"{output_path} now contains {n_out} example{'' if n_out == 1 else 's'}")
 
 
-def print_usage_and_exit():
-    print(
-        f"Usage: {sys.argv[0]} --from path/to/dataset.h5 --range start_index end_index_inclusive --to path/to/new_dataset.h5 [--append] [--recomputesdf] [--skipduplicates]"
-    )
-    exit(-1)
-
+all_filters = [
+    ("empty_inside", middle_is_empty),
+    ("empty_outside", outside_is_empty),
+]
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -115,6 +126,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--skipduplicates", dest="skipduplicates", default=False, action="store_true"
     )
+    parser.add_argument(
+        "--filter",
+        type=str,
+        choices=[s for s, f in all_filters],
+        dest="filter",
+        required=False,
+        default=None,
+    )
 
     args = parser.parse_args()
 
@@ -126,6 +145,11 @@ if __name__ == "__main__":
     recompute_sdf = args.recomputesdf
     skip_duplicates = args.skipduplicates
 
+    if args.filter is None:
+        filter_fn = lambda _: True
+    else:
+        filter_fn = [f for s, f in all_filters if s == args.filter][0]
+
     main(
         input_paths=input_paths,
         start_index=start_index,
@@ -134,4 +158,5 @@ if __name__ == "__main__":
         append=append,
         recompute_sdf=recompute_sdf,
         skip_duplicates=skip_duplicates,
+        filter_fn=filter_fn,
     )

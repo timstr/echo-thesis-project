@@ -8,7 +8,7 @@ from assert_eq import assert_eq
 from network_utils import split_network_prediction
 from signals_and_geometry import sample_obstacle_map
 from simulation_description import SimulationDescription
-from the_device import the_device
+from which_device import get_compute_device
 from utils import progress_bar
 
 
@@ -34,13 +34,13 @@ def _render_volumetric_slices(
             start=description.xmin,
             end=description.xmax,
             steps=description.Nx,
-            device=the_device,
+            device=get_compute_device(),
         )
         y_ls = torch.linspace(
             start=description.ymin,
             end=description.ymax,
             steps=description.Ny,
-            device=the_device,
+            device=get_compute_device(),
         )
 
         x_grid, y_grid = torch.meshgrid([x_ls, y_ls])
@@ -53,7 +53,7 @@ def _render_volumetric_slices(
             z = description.zmin + t * (description.zmax - description.zmin)
 
             z_grid = z * torch.ones_like(x_grid)
-            xyz = torch.stack([x_grid, y_grid, z_grid], dim=2).to(the_device)
+            xyz = torch.stack([x_grid, y_grid, z_grid], dim=2).to(get_compute_device())
             assert_eq(xyz.shape, (description.Nx, description.Ny, 3))
             xyz = xyz.reshape((description.Nx * description.Ny), 3)
 
@@ -370,9 +370,9 @@ def _raymarch_sdf_impl(
 
         # create grid of sampling points using meshgrid between two camera directions
         def make_tensor_3f(t, normalize=False):
-            ret = torch.tensor([*t], dtype=torch.float32, device="cuda").reshape(
-                3, 1, 1
-            )
+            ret = torch.tensor(
+                [*t], dtype=torch.float32, device=get_compute_device()
+            ).reshape(3, 1, 1)
             if normalize:
                 return ret / torch.norm(ret, dim=0, keepdim=True)
             return ret
@@ -385,8 +385,12 @@ def _raymarch_sdf_impl(
         )
 
         # create grid of view vectors using cross of two camera directions (and maybe offset from center for slight perspective)
-        ls_x = torch.linspace(start=-1.0, end=1.0, steps=x_resolution, device="cuda")
-        ls_y = torch.linspace(start=-1.0, end=1.0, steps=y_resolution, device="cuda")
+        ls_x = torch.linspace(
+            start=-1.0, end=1.0, steps=x_resolution, device=get_compute_device()
+        )
+        ls_y = torch.linspace(
+            start=-1.0, end=1.0, steps=y_resolution, device=get_compute_device()
+        )
         grid_x, grid_y = torch.meshgrid(ls_x, ls_y)
         offsets_x = grid_x.unsqueeze(0) * camera_right
         offsets_y = grid_y.unsqueeze(0) * camera_up
@@ -427,21 +431,25 @@ def _raymarch_sdf_impl(
 
         # keep a boolean mask of rays that have not yet collided
         active = torch.ones(
-            (x_resolution, y_resolution), dtype=torch.bool, device="cuda"
+            (x_resolution, y_resolution), dtype=torch.bool, device=get_compute_device()
         )
 
         hit_axes = torch.zeros(
-            (x_resolution, y_resolution), dtype=torch.bool, device="cuda"
+            (x_resolution, y_resolution), dtype=torch.bool, device=get_compute_device()
         )
 
         if show_emitter:
             hit_emitter = torch.zeros(
-                (x_resolution, y_resolution), dtype=torch.bool, device="cuda"
+                (x_resolution, y_resolution),
+                dtype=torch.bool,
+                device=get_compute_device(),
             )
 
         if show_receivers:
             hit_receivers = torch.zeros(
-                (x_resolution, y_resolution), dtype=torch.bool, device="cuda"
+                (x_resolution, y_resolution),
+                dtype=torch.bool,
+                device=get_compute_device(),
             )
 
         num_iterations = 64
@@ -508,7 +516,9 @@ def _raymarch_sdf_impl(
             progress_bar(i, num_iterations)
 
         ret = torch.zeros(
-            (3, x_resolution, y_resolution), dtype=torch.float32, device="cuda"
+            (3, x_resolution, y_resolution),
+            dtype=torch.float32,
+            device=get_compute_device(),
         )
 
         # fill non-collided pixels with background colour

@@ -1,34 +1,36 @@
-from device_dict import DeviceDict
-from reshape_layer import Reshape
 import torch
 import torch.nn as nn
 
+from assert_eq import assert_eq
+from reshape_layer import Reshape
 
-def circle_c(*args):
+
+def _c(*args):
     return torch.cat(args, dim=1)
 
 
-def slash4(x=None):
+def _slash4(x=None):
     if x is None:
-        return nn.MaxPool2d(4, 4)
+        return nn.MaxPool2d(kernel_size=4, stride=4)
     else:
-        return nn.functional.max_pool2d(x, 4, 4)
+        return nn.functional.max_pool2d(
+            x,
+            kernel_size=4,
+            stride=4,
+        )
 
 
-def defconv3x3_x2(in_features, middle_features, out_features):
-    # NOTE: different padding modes and strides do not appear
-    # to be available for DeformConv2D
+def _3x3_2def(in_features, middle_features, out_features):
     return nn.Sequential(
-        # DeformConv2D(in_features, middle_features, kernel_size=3, padding=1),
         nn.Conv2d(
             in_features,
             middle_features,
             kernel_size=3,
             stride=1,
             padding=1,
-            padding_mode="same",
+            padding_mode="replicate",
         ),
-        # nn.BatchNorm2d(middle_features),
+        nn.BatchNorm2d(middle_features),
         nn.ReLU(),
         nn.Conv2d(
             middle_features,
@@ -36,79 +38,93 @@ def defconv3x3_x2(in_features, middle_features, out_features):
             kernel_size=3,
             stride=1,
             padding=1,
-            padding_mode="same",
+            padding_mode="replicate",
         ),
-        # DeformConv2D(middle_features, out_features, kernel_size=3, padding=1),
-        # nn.BatchNorm2d(out_features),
+        nn.BatchNorm2d(out_features),
         nn.ReLU(),
     )
 
 
-def conv3x3_x2(in_features, middle_features, out_features):
+def _3x3_2conv2d(in_features, middle_features, out_features):
     return nn.Sequential(
         nn.Conv2d(
             in_features,
             middle_features,
             kernel_size=3,
             padding=1,
-            padding_mode="same",
+            padding_mode="replicate",
             stride=1,
         ),
-        # nn.BatchNorm2d(middle_features),
+        nn.BatchNorm2d(middle_features),
         nn.ReLU(),
         nn.Conv2d(
             middle_features,
             out_features,
             kernel_size=3,
             padding=1,
-            padding_mode="same",
+            padding_mode="replicate",
             stride=1,
         ),
-        # nn.BatchNorm2d(out_features),
+        nn.BatchNorm2d(out_features),
         nn.ReLU(),
     )
 
 
-def conv3x3x3_x2(in_features, middle_features, out_features):
+def _3x3x3_2conv3d(in_features, middle_features, out_features):
     return nn.Sequential(
         nn.Conv3d(
             in_features,
             middle_features,
             kernel_size=3,
             padding=1,
-            padding_mode="same",
+            padding_mode="replicate",
             stride=1,
         ),
-        # nn.BatchNorm3d(middle_features),
+        nn.BatchNorm3d(middle_features),
         nn.ReLU(),
         nn.Conv3d(
             middle_features,
             out_features,
             kernel_size=3,
             padding=1,
-            padding_mode="same",
+            padding_mode="replicate",
             stride=1,
         ),
-        # nn.BatchNorm3d(out_features),
+        nn.BatchNorm3d(out_features),
         nn.ReLU(),
     )
 
 
-def conv1x1x1(in_features, out_features):
+def _1x1x1_conv3d(in_features, out_features):
     return nn.Conv3d(in_features, out_features, kernel_size=1, padding=0, stride=1)
 
 
-def convT3d(dilation, in_features, out_features):
+def _x2_convT3d(in_features, out_features):
     return nn.Sequential(
         nn.ConvTranspose3d(
             in_features,
             out_features,
-            kernel_size=dilation,
-            stride=dilation,
+            kernel_size=2,
+            stride=2,
             padding=0,
             output_padding=0,
         ),
-        # nn.BatchNorm3d(out_features),
+        nn.BatchNorm3d(out_features),
+        nn.ReLU(),
+    )
+
+
+def _x4_convT3d(in_features, out_features):
+    return nn.Sequential(
+        nn.ConvTranspose3d(
+            in_features,
+            out_features,
+            kernel_size=4,
+            stride=4,
+            padding=0,
+            output_padding=0,
+        ),
+        nn.BatchNorm3d(out_features),
         nn.ReLU(),
     )
 
@@ -117,19 +133,19 @@ class AuditoryPathway(nn.Module):
     def __init__(self):
         super(AuditoryPathway, self).__init__()
 
-        self.l1_r = defconv3x3_x2(1, 8, 32)
-        self.l1_l = defconv3x3_x2(1, 8, 32)
-        self.l1_u = defconv3x3_x2(1, 8, 32)
-        self.l1_d = defconv3x3_x2(1, 8, 32)
+        self.l1_r = _3x3_2def(1, 32, 32)
+        self.l1_l = _3x3_2def(1, 32, 32)
+        self.l1_u = _3x3_2def(1, 32, 32)
+        self.l1_d = _3x3_2def(1, 32, 32)
 
-        self.l2_rl = defconv3x3_x2(64, 64, 64)
-        self.l2_ud = defconv3x3_x2(64, 64, 64)
+        self.l2_rl = _3x3_2def(64, 64, 64)
+        self.l2_ud = _3x3_2def(64, 64, 64)
 
-        self.l3 = defconv3x3_x2(256, 256, 256)
+        self.l3 = _3x3_2def(256, 256, 256)
 
     def forward(self, x):
         B = x.shape[0]
-        assert x.shape == (B, 4, 256, 256)
+        assert_eq(x.shape, (B, 4, 256, 256))
 
         # Assumption: spectrogram images are stored right, left, up, down order
 
@@ -138,42 +154,72 @@ class AuditoryPathway(nn.Module):
         u = self.l1_u(x[:, 2:3])
         d = self.l1_d(x[:, 3:4])
 
-        rl = self.l2_rl(circle_c(r, l))
-        ud = self.l2_ud(circle_c(u, d))
+        assert_eq(r.shape, (B, 32, 256, 256))
+        assert_eq(l.shape, (B, 32, 256, 256))
+        assert_eq(u.shape, (B, 32, 256, 256))
+        assert_eq(d.shape, (B, 32, 256, 256))
 
-        r = slash4(r)
-        l = slash4(l)
-        u = slash4(u)
-        d = slash4(d)
+        rl = self.l2_rl(_c(r, l))
+        ud = self.l2_ud(_c(u, d))
 
-        rl = slash4(rl)
-        ud = slash4(ud)
+        assert_eq(rl.shape, (B, 64, 256, 256))
+        assert_eq(ud.shape, (B, 64, 256, 256))
 
-        rlud = self.l3(circle_c(r, rl, l, u, ud, d))
+        r = _slash4(r)
+        l = _slash4(l)
+        u = _slash4(u)
+        d = _slash4(d)
 
-        r = slash4(r)
-        l = slash4(l)
-        u = slash4(u)
-        d = slash4(d)
+        assert_eq(r.shape, (B, 32, 64, 64))
+        assert_eq(l.shape, (B, 32, 64, 64))
+        assert_eq(u.shape, (B, 32, 64, 64))
+        assert_eq(d.shape, (B, 32, 64, 64))
 
-        rl = slash4(rl)
-        ud = slash4(ud)
+        rl = _slash4(rl)
+        ud = _slash4(ud)
 
-        rlud = slash4(rlud)
+        assert_eq(rl.shape, (B, 64, 64, 64))
+        assert_eq(ud.shape, (B, 64, 64, 64))
 
-        return circle_c(r, rl, r, rlud, u, ud, d)
+        rlud = self.l3(_c(r, rl, l, u, ud, d))
+
+        assert_eq(rlud.shape, (B, 256, 64, 64))
+
+        r = _slash4(r)
+        l = _slash4(l)
+        u = _slash4(u)
+        d = _slash4(d)
+
+        assert_eq(r.shape, (B, 32, 16, 16))
+        assert_eq(l.shape, (B, 32, 16, 16))
+        assert_eq(u.shape, (B, 32, 16, 16))
+        assert_eq(d.shape, (B, 32, 16, 16))
+
+        rl = _slash4(rl)
+        ud = _slash4(ud)
+
+        assert_eq(rl.shape, (B, 64, 16, 16))
+        assert_eq(ud.shape, (B, 64, 16, 16))
+
+        rlud = _slash4(rlud)
+
+        assert_eq(rlud.shape, (B, 256, 16, 16))
+
+        output = _c(r, rl, r, rlud, u, ud, d)
+
+        assert_eq(output.shape, (B, 512, 16, 16))
+
+        return output
 
 
 class BatGNet(nn.Module):
-    def __init__(self, debug_mode=False):
+    def __init__(self):
         super(BatGNet, self).__init__()
-
-        self._debug_mode = debug_mode
 
         self.lw_ap = AuditoryPathway()
         self.sw_ap = AuditoryPathway()
 
-        self.l4 = conv3x3_x2(1024, 512, 256)
+        self.l4 = _3x3_2conv2d(1024, 512, 256)
 
         self.fc = nn.Sequential(
             Reshape((256, 4, 4), (256 * 4 * 4,)),
@@ -182,45 +228,48 @@ class BatGNet(nn.Module):
         )
 
         self.decoder = nn.Sequential(
-            convT3d(2, 64, 64),
-            conv3x3x3_x2(64, 32, 32),
-            convT3d(2, 32, 32),
-            conv3x3x3_x2(32, 16, 16),
-            convT3d(4, 16, 16),
-            conv3x3x3_x2(16, 8, 8),
-            conv1x1x1(8, 1),
+            _x2_convT3d(64, 64),
+            _3x3x3_2conv3d(64, 32, 32),
+            _x2_convT3d(32, 32),
+            _3x3x3_2conv3d(32, 16, 16),
+            _x4_convT3d(16, 16),
+            _3x3x3_2conv3d(16, 8, 8),
+            _1x1x1_conv3d(8, 1),
             Reshape((1, 64, 64, 64), (64, 64, 64)),
         )
 
     def forward(self, x):
-        if self._debug_mode:
-            with torch.autograd.detect_anomaly():
-                return self.forward_impl(x)
-        else:
-            return self.forward_impl(x)
-
-    def forward_impl(self, x):
-        x = x["input"]
         B = x.shape[0]
-        assert x.shape == (B, 8, 256, 256)
+        assert_eq(x.shape, (B, 8, 256, 256))
 
         # Assumption: spectrogram images are stored LW right, LW left, LW up, LW down, SW right, SW left, SW up, SW down
 
         lw = self.lw_ap(x[:, 0:4])
         sw = self.sw_ap(x[:, 4:8])
 
-        x = circle_c(lw, sw)
+        assert_eq(lw.shape, (B, 512, 16, 16))
+        assert_eq(sw.shape, (B, 512, 16, 16))
+
+        x = _c(lw, sw)
+
+        assert_eq(x.shape, (B, 1024, 16, 16))
 
         x = self.l4(x)
 
-        x = slash4(x)
+        assert_eq(x.shape, (B, 256, 16, 16))
+
+        x = _slash4(x)
+
+        assert_eq(x.shape, (B, 256, 4, 4))
 
         x = self.fc(x)
 
+        assert_eq(x.shape, (B, 64, 4, 4, 4))
+
         x = self.decoder(x)
 
-        assert x.shape == (B, 64, 64, 64)
+        assert_eq(x.shape, (B, 64, 64, 64))
 
-        x = torch.softmax(x, dim=1)
+        # x = torch.sigmoid(x)
 
-        return DeviceDict({"output": x})
+        return x

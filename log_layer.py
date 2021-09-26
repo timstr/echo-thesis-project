@@ -15,5 +15,8 @@ class Log(nn.Module):
         print(f"Log Layer - {self._description}")
         print(f"    Batch size:   {x.shape[0]}")
         print(f"    Tensor shape: {x.shape[1:]}")
+        print(f"    Minimum: {torch.min(x).item()}")
+        print(f"    Maximum: {torch.max(x).item()}")
+        print(f"    Mean: {torch.mean(x).item()}")
         print("")
         return x

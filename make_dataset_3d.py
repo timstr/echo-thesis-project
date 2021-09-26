@@ -9,6 +9,7 @@ import os
 import math
 from argparse import ArgumentParser
 
+from which_device import get_compute_device
 from simulation_description import SimulationDescription
 from h5ds import H5DS
 from dataset3d import WaveDataset3d
@@ -26,20 +27,20 @@ from signals_and_geometry import obstacle_map_to_sdf
 
 
 def make_inner_outer_partitions():
-    f = np.cbrt(0.5)
+    f = math.sqrt(0.5)
 
     f_lo = 0.5 - 0.5 * f
     f_hi = 0.5 + 0.5 * f
 
-    x_min = Nx - minimum_x_units
+    x_min = minimum_x_units
     y_min = 0
     z_min = 0
     x_extent = Nx - minimum_x_units
     y_extent = Ny
     z_extent = Nz
 
-    x_lo = x_min + round(x_extent * f_lo)
-    x_hi = x_min + round(x_extent * f_hi)
+    x_lo = x_min
+    x_hi = x_min + x_extent
     y_lo = y_min + round(y_extent * f_lo)
     y_hi = y_min + round(y_extent * f_hi)
     z_lo = z_min + round(z_extent * f_lo)
@@ -381,7 +382,11 @@ def main():
                 continue
             desc.set_obstacles(o)
             results = desc.run(verbose=args.verbose)
-            sdf = obstacle_map_to_sdf(torch.tensor(o).cuda(), desc).cpu().numpy()
+            sdf = (
+                obstacle_map_to_sdf(torch.tensor(o).to(get_compute_device()), desc)
+                .cpu()
+                .numpy()
+            )
             dataset.append_to_dataset(obstacles=o, recordings=results, sdf=sdf)
 
 

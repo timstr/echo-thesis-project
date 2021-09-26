@@ -10,6 +10,19 @@ from assert_eq import assert_eq
 from utils import progress_bar
 
 
+# signed, clipped logarithm
+# def sclog(t):
+#     max_val = 1e0
+#     min_val = 1e-5
+#     signs = torch.sign(t)
+#     t = torch.abs(t)
+#     t = torch.clamp(t, min=min_val, max=max_val)
+#     t = torch.log(t)
+#     t = (t - math.log(min_val)) / (math.log(max_val) - math.log(min_val))
+#     t = t * signs
+#     return t
+
+
 def make_fm_chirp(
     begin_frequency_Hz,
     end_frequency_Hz,
@@ -175,6 +188,11 @@ def sample_obstacle_map(obstacle_map_batch, locations_xyz_batch, description):
     assert isinstance(obstacle_map_batch, torch.Tensor)
     assert isinstance(locations_xyz_batch, torch.Tensor)
     assert isinstance(description, SimulationDescription)
+    assert (obstacle_map_batch.ndim, locations_xyz_batch.ndim) in [(3, 2), (4, 3)]
+    batch_mode = obstacle_map_batch.ndim == 4
+    if not batch_mode:
+        obstacle_map_batch = obstacle_map_batch.unsqueeze(0)
+        locations_xyz_batch = locations_xyz_batch.unsqueeze(0)
     B = obstacle_map_batch.shape[0]
     assert_eq(
         obstacle_map_batch.shape,
@@ -235,7 +253,12 @@ def sample_obstacle_map(obstacle_map_batch, locations_xyz_batch, description):
 
     assert_eq(values.shape, (B, 1, N, 1, 1))
 
-    return values.reshape(B, N)
+    values = values.reshape(B, N)
+
+    if not batch_mode:
+        values = values.squeeze(0)
+
+    return values
 
 
 def time_of_flight_crop(
@@ -246,7 +269,7 @@ def time_of_flight_crop(
     speed_of_sound,
     sampling_frequency,
     crop_length_samples,
-    apply_amplitude_correction=False,
+    apply_amplitude_correction=True,
 ):
     """
     recordings:
@@ -423,3 +446,36 @@ def time_of_flight_crop(
         return recordings_cropped_amplified
 
     return recordings_cropped
+
+
+def sdf_to_occupancy(sdf, threshold=0.0):
+    assert isinstance(sdf, torch.Tensor)
+    assert_eq(sdf.dtype, torch.float32)
+    assert isinstance(threshold, float)
+    return sdf <= threshold
+
+
+def backfill_occupancy(occupancy):
+    assert isinstance(occupancy, torch.Tensor)
+    assert_eq(occupancy.dtype, torch.bool)
+    Nx, Ny, Nz = occupancy.shape
+    mask = torch.zeros((Ny, Nz), dtype=torch.bool, device=occupancy.device)
+    ret = torch.zeros_like(occupancy)
+    for x in range(Nx):
+        mask.logical_or_(occupancy[x])
+        ret[x] = mask
+    return ret
+
+
+def backfill_depthmap(depthmap, Nx):
+    assert isinstance(depthmap, torch.Tensor)
+    assert_eq(depthmap.dtype, torch.float32)
+    assert isinstance(Nx, int)
+    assert Nx > 0
+    Ny, Nz = depthmap.shape
+    ret = torch.zeros((Nx, Ny, Nz), dtype=torch.bool, device=depthmap.device)
+    for x in range(Nx):
+        # t = x / (Nx - 1)
+        t = x / Nx
+        ret[x] = depthmap <= t
+    return ret

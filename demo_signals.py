@@ -9,7 +9,7 @@ from argparse import ArgumentParser
 
 from current_simulation_description import make_simulation_description
 from dataset3d import WaveDataset3d, k_sensor_recordings
-from the_device import the_device
+from which_device import get_compute_device
 from signals_and_geometry import make_fm_chirp, convolve_recordings
 
 

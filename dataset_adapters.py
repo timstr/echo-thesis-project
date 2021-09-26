@@ -1,5 +1,5 @@
+from signals_and_geometry import convolve_recordings  # , sclog
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio
 
@@ -7,6 +7,17 @@ from assert_eq import assert_eq
 from dataset3d import k_obstacles, k_sensor_recordings
 from device_dict import DeviceDict
 from current_simulation_description import Nx, Ny, Nz, minimum_x_units
+
+from which_device import get_compute_device
+
+
+# def sclog_dict(dd):
+#     assert isinstance(dd, DeviceDict)
+#     dd_new = DeviceDict({})
+#     for k, v in dd.items():
+#         dd_new[k] = v
+#     dd_new[k_sensor_recordings] = sclog(dd[k_sensor_recordings])
+#     return dd_new
 
 
 def subset_recordings_dict(dd, sensor_indices):
@@ -27,7 +38,7 @@ def subset_recordings_dict(dd, sensor_indices):
 
 def convolve_recordings_dict(dd, emitter_signal):
     assert isinstance(dd, DeviceDict)
-    assert isinstance(sensor_indices, list)
+    assert isinstance(emitter_signal, torch.Tensor)
     dd_new = DeviceDict({})
     for k, v in dd.items():
         dd_new[k] = v
@@ -36,6 +47,31 @@ def convolve_recordings_dict(dd, emitter_signal):
     sensor_recordings = convolve_recordings(emitter_signal, sensor_recordings)
     dd_new[k_sensor_recordings] = sensor_recordings
     return dd_new
+
+
+def occupancy_grid_to_depthmap(occupancy, spatial_dimension):
+    assert isinstance(occupancy, torch.Tensor)
+    assert_eq(occupancy.dtype, torch.bool)
+    assert spatial_dimension in [0, 1, 2]
+    batch_mode = occupancy.ndim == 4
+    if not batch_mode:
+        occupancy = occupancy.unsqueeze(0)
+    B, H, W, D = occupancy.shape
+    if spatial_dimension == 0:
+        depthmap = torch.ones((B, W, D), device=occupancy.device)
+        for i in range(H):
+            depthmap[occupancy[:, i, :, :]] = 1.0 - (i / (H - 1))
+    elif spatial_dimension == 1:
+        depthmap = torch.ones((B, H, D), device=occupancy.device)
+        for i in range(W):
+            depthmap[occupancy[:, :, i, :]] = 1.0 - (i / (W - 1))
+    elif spatial_dimension == 2:
+        depthmap = torch.ones((B, H, W), device=occupancy.device)
+        for i in range(D):
+            depthmap[occupancy[:, :, :, i]] = 1.0 - (i / (D - 1))
+    if not batch_mode:
+        depthmap = depthmap.squeeze(0)
+    return depthmap
 
 
 # batvision waveform input
@@ -53,6 +89,7 @@ def wavesim_to_batvision_waveform(dd):
         audio, size=3200, mode="linear", align_corners=False
     )
     assert_eq(audio_resampled.shape, (B, 4, 3200))
+    audio_resampled = audio_resampled.reshape(B, 4, 1, 3200)
     if not batch_mode:
         audio_resampled = audio_resampled.squeeze(0)
     return audio_resampled
@@ -65,7 +102,7 @@ to_spectrogram_batvision = torchaudio.transforms.Spectrogram(
     win_length=64,
     hop_length=6,
     window_fn=torch.hann_window,
-)
+).to(get_compute_device())
 
 
 def wavesim_to_batvision_spectrogram(dd):
@@ -105,12 +142,7 @@ def wavesim_to_batvision_depthmap(dd):
     B = obstacles.shape[0]
     assert_eq(obstacles.shape, (B, Nx, Ny, Nz))
 
-    depthmap = torch.ones((B, Ny, Nz), device=obstacles.device)
-
-    for x in range(Nx - minimum_x_units):
-        xx = Nx - x - 1
-        depth = 1.0 - x / (Nx - minimum_x_units - 1)
-        depthmap[obstacles[:, xx]] = depth
+    depthmap = occupancy_grid_to_depthmap(obstacles, spatial_dimension=0)
 
     depthmap = F.interpolate(
         depthmap.unsqueeze(1),
@@ -133,13 +165,13 @@ to_spectrogram_batgnet_sw = torchaudio.transforms.Spectrogram(
     win_length=64,
     hop_length=8,
     window_fn=torch.hann_window,
-)
+).to(get_compute_device())
 to_spectrogram_batgnet_lw = torchaudio.transforms.Spectrogram(
     n_fft=512,
     win_length=256,
     hop_length=8,
     window_fn=torch.hann_window,
-)
+).to(get_compute_device())
 
 
 def wavesim_to_batgnet_spectrogram(dd):
@@ -175,8 +207,9 @@ def wavesim_to_batgnet_spectrogram(dd):
 
 # batgnet occupancy output
 # dd{obstacles} => dd{obstacles}, resample ROI to 64x64x64, back-fill
-def wavesim_to_batgnet_occupancy(dd):
+def wavesim_to_batgnet_occupancy(dd, backfill):
     assert isinstance(dd, DeviceDict)
+    assert isinstance(backfill, bool)
     obstacles = dd[k_obstacles]
     batch_mode = obstacles.ndim == 4
     if not batch_mode:
@@ -198,11 +231,12 @@ def wavesim_to_batgnet_occupancy(dd):
 
     assert_eq(occupancy.shape, (B, 64, 64, 64))
 
-    mask = torch.zeros((B, 64, 64), dtype=torch.bool, device=obstacles.device)
+    if backfill:
+        mask = torch.zeros((B, 64, 64), dtype=torch.bool, device=obstacles.device)
 
-    for x in range(64):
-        mask.logical_or_(occupancy[:, x])
-        occupancy[:, x] = mask
+        for x in range(64):
+            mask.logical_or_(occupancy[:, x])
+            occupancy[:, x] = mask
 
     if not batch_mode:
         occupancy = occupancy.squeeze(0)

@@ -1,10 +1,26 @@
+from dataset_adapters import (
+    wavesim_to_batgnet_occupancy,
+    wavesim_to_batgnet_spectrogram,
+    wavesim_to_batvision_depthmap,
+    wavesim_to_batvision_spectrogram,
+    wavesim_to_batvision_waveform,
+)
+import numpy as np
 import torch
 import torch.nn as nn
 
+from signals_and_geometry import (
+    backfill_occupancy,
+    sample_obstacle_map,
+    sdf_to_occupancy,
+)
+from split_till_it_fits import SplitSize, split_till_it_fits
 from assert_eq import assert_eq
 from utils import progress_bar
 from simulation_description import SimulationDescription
-from current_simulation_description import minimum_x_units
+from current_simulation_description import all_grid_locations, minimum_x_units
+from which_device import get_compute_device
+from dataset3d import k_sdf, k_sensor_recordings
 
 
 def split_network_prediction(
@@ -36,22 +52,11 @@ def split_network_prediction(
         return prediction
 
 
-def evaluate_prediction(sdf_pred, sdf_gt, description, downsample_factor):
-    assert isinstance(sdf_pred, torch.Tensor)
-    assert isinstance(sdf_gt, torch.Tensor)
-    assert isinstance(description, SimulationDescription)
-    assert isinstance(downsample_factor, int)
-    assert downsample_factor >= 1
-    x_steps = (description.Nx - minimum_x_units) // downsample_factor
-    y_steps = description.Ny // downsample_factor
-    z_steps = description.Nz // downsample_factor
-    assert_eq(sdf_pred.shape, (x_steps, y_steps, z_steps))
-    assert_eq(sdf_gt.shape, (x_steps, y_steps, z_steps))
-
-    mse_sdf = torch.mean((sdf_pred - sdf_gt) ** 2).item()
-
-    occupancy_pred = (sdf_pred <= 0.0).bool()
-    occupancy_gt = (sdf_gt <= 0.0).bool()
+def evaluate_prediction(occupancy_pred, occupancy_gt):
+    assert isinstance(occupancy_pred, torch.Tensor)
+    assert_eq(occupancy_pred.dtype, torch.bool)
+    assert isinstance(occupancy_gt, torch.Tensor)
+    assert_eq(occupancy_gt.dtype, torch.bool)
 
     gt_true = occupancy_gt
     gt_false = torch.logical_not(occupancy_gt)
@@ -116,7 +121,6 @@ def evaluate_prediction(sdf_pred, sdf_gt, description, downsample_factor):
     )
 
     return {
-        "mean_squared_error_sdf": mse_sdf,
         "intersection": f_intersection,
         "union": f_union,
         "intersection_over_union": intersection_over_union,
@@ -128,3 +132,144 @@ def evaluate_prediction(sdf_pred, sdf_gt, description, downsample_factor):
         "recall": recall,
         "f1score": f1score,
     }
+
+
+def evaluate_tofnet_on_whole_dataset(
+    the_model,
+    dataset,
+    description,
+    validationdownsampling,
+    adapt_signals_fn,
+    sdf_offset,
+    backfill,
+    split_size,
+):
+    assert isinstance(the_model, nn.Module)
+    assert isinstance(description, SimulationDescription)
+    assert isinstance(validationdownsampling, int)
+    assert isinstance(sdf_offset, float)
+    assert isinstance(backfill, bool)
+    assert isinstance(split_size, SplitSize)
+    with torch.no_grad():
+        total_metrics = {}
+        locations = all_grid_locations(
+            get_compute_device(), description, downsample_factor=validationdownsampling
+        )
+        x_steps = (description.Nx - minimum_x_units) // validationdownsampling
+        y_steps = description.Ny // validationdownsampling
+        z_steps = description.Nz // validationdownsampling
+        N = len(dataset)
+        for i, dd in enumerate(dataset):
+            example = adapt_signals_fn(dd.to(get_compute_device()))
+
+            sdf_gt = sample_obstacle_map(
+                obstacle_map_batch=example[k_sdf].to(get_compute_device()),
+                locations_xyz_batch=locations,
+                description=description,
+            )
+
+            sdf_pred = split_till_it_fits(
+                split_network_prediction,
+                split_size,
+                model=the_model,
+                locations=locations,
+                recordings=example[k_sensor_recordings],
+                description=description,
+            )
+
+            sdf_pred = sdf_pred.reshape(x_steps, y_steps, z_steps)
+            sdf_gt = sdf_gt.reshape(x_steps, y_steps, z_steps)
+
+            occupancy_gt = sdf_to_occupancy(sdf_gt)
+            occupancy_pred = sdf_to_occupancy(sdf_pred, threshold=sdf_offset)
+
+            if backfill:
+                occupancy_gt = backfill_occupancy(occupancy_gt)
+                occupancy_pred = backfill_occupancy(occupancy_pred)
+
+            metrics = evaluate_prediction(
+                occupancy_gt=occupancy_gt, occupancy_pred=occupancy_pred
+            )
+
+            mae_sdf = torch.mean(torch.abs(sdf_gt - sdf_pred)).item()
+
+            metrics["mean_absolute_error_sdf"] = mae_sdf
+
+            assert isinstance(metrics, dict)
+            for k, v in metrics.items():
+                assert isinstance(v, float)
+                if not k in total_metrics:
+                    total_metrics[k] = []
+                total_metrics[k].append(v)
+            progress_bar(i, N)
+
+        mean_metrics = {}
+        for k, v in total_metrics.items():
+            mean_metrics[k] = np.mean(v)
+
+        return mean_metrics
+
+
+def evaluate_batvision_on_whole_dataset(
+    the_model,
+    dataset,
+    description,
+    adapt_signals_fn,
+    batvision_mode,
+):
+    assert isinstance(the_model, nn.Module)
+    assert isinstance(description, SimulationDescription)
+    assert batvision_mode in ["waveform", "spectrogram"]
+    with torch.no_grad():
+        all_errors = []
+        N = len(dataset)
+        for i, dd in enumerate(dataset):
+            example = adapt_signals_fn(dd.to(get_compute_device()))
+            if batvision_mode == "waveform":
+                inputs = wavesim_to_batvision_waveform(example)
+            else:
+                inputs = wavesim_to_batvision_spectrogram(example)
+
+            depthmap_gt = wavesim_to_batvision_depthmap(example)
+            assert_eq(depthmap_gt.shape, (128, 128))
+
+            depthmap_pred = the_model(inputs.unsqueeze(0)).squeeze(0)
+            assert_eq(depthmap_pred.shape, (128, 128))
+
+            error = torch.mean(torch.abs(depthmap_pred - depthmap_gt))
+
+            all_errors.append(error.item())
+
+            progress_bar(i, N)
+
+        return np.mean(all_errors)
+
+
+def evaluate_batgnet_on_whole_dataset(
+    the_model, dataset, description, adapt_signals_fn, backfill
+):
+    assert isinstance(the_model, nn.Module)
+    assert isinstance(description, SimulationDescription)
+    assert isinstance(backfill, bool)
+    with torch.no_grad():
+        all_errors = []
+        N = len(dataset)
+        for i, dd in enumerate(dataset):
+            example = adapt_signals_fn(dd.to(get_compute_device()))
+            spectrograms = wavesim_to_batgnet_spectrogram(example)
+
+            occupancy_gt = (
+                wavesim_to_batgnet_occupancy(example, backfill).squeeze(0).float()
+            )
+            assert_eq(occupancy_gt.shape, (64, 64, 64))
+
+            occupancy_pred = the_model(spectrograms.unsqueeze(0)).squeeze(0)
+            assert_eq(occupancy_pred.shape, (64, 64, 64))
+
+            error = torch.mean(torch.square(occupancy_pred - occupancy_gt))
+
+            all_errors.append(error.item())
+
+            progress_bar(i, N)
+
+        return np.mean(all_errors)

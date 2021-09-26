@@ -14,7 +14,7 @@ from current_simulation_description import (
 from assert_eq import assert_eq
 from utils import is_power_of_2
 from dataset3d import WaveDataset3d, k_sensor_recordings, k_sdf
-from the_device import the_device
+from which_device import get_compute_device
 from split_till_it_fits import SplitSize, split_till_it_fits
 from visualization import (
     colourize_sdf,
@@ -203,7 +203,7 @@ def main():
         wave="sine",
     )
 
-    chirp = chirp.to(the_device)
+    chirp = chirp.to(get_compute_device())
 
     splits = SplitSize("render_slices_prediction")
 
@@ -213,12 +213,14 @@ def main():
         )
     example = dataset[args.index]
 
-    recordings_ir = example[k_sensor_recordings][sensor_indices].to(the_device)
+    recordings_ir = example[k_sensor_recordings][sensor_indices].to(
+        get_compute_device()
+    )
 
     recordings_chirp = convolve_recordings(chirp, recordings_ir)
     # recordings_chirp = recordings_ir
 
-    obstacles = example[k_sdf].to(the_device)
+    obstacles = example[k_sdf].to(get_compute_device())
 
     model = SimpleTOFPredictor(
         speed_of_sound=description.air_properties.speed_of_sound,
@@ -227,7 +229,7 @@ def main():
         crop_length_samples=args.tofcropsize,
         emitter_location=description.emitter_location,
         receiver_locations=description.sensor_locations[sensor_indices],
-    ).to(the_device)
+    ).to(get_compute_device())
 
     fig, axes = plt.subplots(1, 2, figsize=(8, 4), dpi=80)
 

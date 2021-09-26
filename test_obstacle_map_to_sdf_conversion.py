@@ -3,6 +3,8 @@ import fix_dead_command_line
 import torch
 import torchvision
 import matplotlib.pyplot as plt
+
+from which_device import get_compute_device
 from visualization import colourize_sdf
 from signals_and_geometry import obstacle_map_to_sdf
 from profiling import Timer
@@ -43,7 +45,7 @@ def main():
     timer_0 = Timer("setup")
     desc = make_simulation_description()
     desc.set_obstacles(make_random_obstacles(desc))
-    obs = torch.tensor(desc.obstacle_mask).cuda()
+    obs = torch.tensor(desc.obstacle_mask).to(get_compute_device())
     timer_0.done()
 
     sdf = obstacle_map_to_sdf(obs, desc)

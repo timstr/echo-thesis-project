@@ -1,24 +1,12 @@
-import math
 import torch
 import torch.nn as nn
+import torch.fft as fft
 import numpy as np
 
 from utils import is_power_of_2
 from assert_eq import assert_eq
 from reshape_layer import Reshape
 from signals_and_geometry import time_of_flight_crop
-
-# signed, clipped logarithm
-def sclog(t):
-    max_val = 1e0
-    min_val = 1e-5
-    signs = torch.sign(t)
-    t = torch.abs(t)
-    t = torch.clamp(t, min=min_val, max=max_val)
-    t = torch.log(t)
-    t = (t - math.log(min_val)) / (math.log(max_val) - math.log(min_val))
-    t = t * signs
-    return t
 
 
 class TimeOfFlightNet(nn.Module):
@@ -30,34 +18,39 @@ class TimeOfFlightNet(nn.Module):
         crop_length_samples,
         emitter_location,
         receiver_locations,
+        use_convolutions,
+        hidden_features,
+        kernel_size,
+        use_fourier_transform,
     ):
         super(TimeOfFlightNet, self).__init__()
 
         assert isinstance(speed_of_sound, float)
-        self.speed_of_sound = speed_of_sound
-
         assert isinstance(sampling_frequency, float)
-        self.sampling_frequency = sampling_frequency
-
         assert isinstance(recording_length_samples, int)
         assert is_power_of_2(recording_length_samples)
-        self.recording_length_samples = recording_length_samples
-
         assert isinstance(crop_length_samples, int)
         assert is_power_of_2(crop_length_samples)
-        self.crop_length_samples = crop_length_samples
-
         assert isinstance(emitter_location, np.ndarray)
         assert_eq(emitter_location.shape, (3,))
         assert_eq(emitter_location.dtype, np.float32)
+        assert isinstance(receiver_locations, np.ndarray)
+        assert receiver_locations.dtype == np.float32
+        assert receiver_locations.shape[1:] == (3,)
+        assert isinstance(use_convolutions, bool)
+        assert isinstance(hidden_features, int)
+        assert isinstance(kernel_size, int)
+        assert isinstance(use_fourier_transform, bool)
+
+        self.speed_of_sound = speed_of_sound
+        self.sampling_frequency = sampling_frequency
+        self.recording_length_samples = recording_length_samples
+        self.crop_length_samples = crop_length_samples
         self.emitter_location = nn.parameter.Parameter(
             data=torch.tensor(emitter_location, dtype=torch.float32),
             requires_grad=False,
         )
 
-        assert isinstance(receiver_locations, np.ndarray)
-        assert receiver_locations.dtype == np.float32
-        assert receiver_locations.shape[1:] == (3,)
         num_receivers = receiver_locations.shape[0]
         self.num_receivers = num_receivers
         receiver_locations_tensor = torch.tensor(
@@ -69,59 +62,79 @@ class TimeOfFlightNet(nn.Module):
             requires_grad=False,
         )
 
-        # Simple 2-layer fully-connected model
-        # hidden_features = 64
-        # self.model = nn.Sequential(
-        #     nn.BatchNorm1d(num_features=num_receivers),
-        #     Reshape(
-        #         (num_receivers, crop_length_samples),
-        #         (num_receivers * crop_length_samples,),
-        #     ),
-        #     nn.Linear(
-        #         in_features=num_receivers * crop_length_samples,
-        #         out_features=hidden_features,
-        #     ),
-        #     nn.ReLU(),
-        #     nn.Linear(in_features=hidden_features, out_features=1),
-        # )
+        self.use_fourier_transform = use_fourier_transform
 
-        conv_features = 128
-        final_length = crop_length_samples // 8
-        final_features = 8
-        conv_kernel_size = 5
-        conv_padding = (conv_kernel_size - 1) // 2
+        if self.use_fourier_transform:
+            self.input_length = (crop_length_samples // 2) + 1
+            self.channels_per_receiver = 2
+        else:
+            self.input_length = crop_length_samples
+            self.channels_per_receiver = 1
 
-        self.model = nn.Sequential(
-            nn.BatchNorm1d(num_features=num_receivers),
-            nn.Conv1d(
-                in_channels=num_receivers,
-                out_channels=conv_features,
-                kernel_size=conv_kernel_size,
-                stride=2,
-                padding=conv_padding,
-            ),
-            nn.ReLU(),
-            nn.BatchNorm1d(num_features=conv_features),
-            nn.Conv1d(
-                in_channels=conv_features,
-                out_channels=conv_features,
-                kernel_size=conv_kernel_size,
-                stride=2,
-                padding=conv_padding,
-            ),
-            nn.ReLU(),
-            nn.BatchNorm1d(num_features=conv_features),
-            nn.Conv1d(
-                in_channels=conv_features,
-                out_channels=final_features,
-                kernel_size=conv_kernel_size,
-                stride=2,
-                padding=conv_padding,
-            ),
-            nn.ReLU(),
-            Reshape((final_features, final_length), (final_features * final_length,)),
-            nn.Linear(in_features=(final_features * final_length), out_features=1),
-        )
+        def activation_function():
+            # return nn.ReLU()
+            return nn.LeakyReLU(0.1)
+
+        if use_convolutions:
+            final_length = self.input_length // 8
+            final_features = 1024 // final_length
+            conv_padding = (kernel_size - 1) // 2
+
+            self.model = nn.Sequential(
+                nn.BatchNorm1d(num_features=num_receivers * self.channels_per_receiver),
+                nn.Conv1d(
+                    in_channels=num_receivers * self.channels_per_receiver,
+                    out_channels=hidden_features,
+                    kernel_size=kernel_size,
+                    stride=2,
+                    padding=conv_padding,
+                ),
+                activation_function(),
+                nn.BatchNorm1d(num_features=hidden_features),
+                nn.Conv1d(
+                    in_channels=hidden_features,
+                    out_channels=hidden_features,
+                    kernel_size=kernel_size,
+                    stride=2,
+                    padding=conv_padding,
+                ),
+                activation_function(),
+                nn.BatchNorm1d(num_features=hidden_features),
+                nn.Conv1d(
+                    in_channels=hidden_features,
+                    out_channels=final_features,
+                    kernel_size=kernel_size,
+                    stride=2,
+                    padding=conv_padding,
+                ),
+                activation_function(),
+                Reshape(
+                    (final_features, final_length), (final_features * final_length,)
+                ),
+                nn.Linear(in_features=(final_features * final_length), out_features=1),
+            )
+        else:
+            # Simple 2-layer fully-connected model
+            self.model = nn.Sequential(
+                nn.BatchNorm1d(num_features=num_receivers * self.channels_per_receiver),
+                Reshape(
+                    (num_receivers * self.channels_per_receiver, self.input_length),
+                    (num_receivers * self.channels_per_receiver * self.input_length,),
+                ),
+                nn.Linear(
+                    in_features=num_receivers
+                    * self.channels_per_receiver
+                    * self.input_length,
+                    out_features=hidden_features,
+                ),
+                activation_function(),
+                nn.Linear(
+                    in_features=hidden_features,
+                    out_features=hidden_features,
+                ),
+                activation_function(),
+                nn.Linear(in_features=hidden_features, out_features=1),
+            )
 
     def forward(self, recordings, sample_locations):
         recordings_cropped = time_of_flight_crop(
@@ -134,15 +147,36 @@ class TimeOfFlightNet(nn.Module):
             crop_length_samples=self.crop_length_samples,
         )
 
-        recordings_cropped = sclog(recordings_cropped)
-
         B1, B2 = sample_locations.shape[:2]
 
-        recordings_cropped_batches_combined = recordings_cropped.reshape(
+        inputs = recordings_cropped.reshape(
             (B1 * B2), self.num_receivers, self.crop_length_samples
         )
 
-        predictions = self.model(recordings_cropped_batches_combined)
+        if self.use_fourier_transform:
+            inputs = fft.rfft(
+                inputs, n=self.crop_length_samples, dim=2, norm="backward"
+            )
+            assert_eq(
+                inputs.shape,
+                (B1 * B2, self.num_receivers, (self.crop_length_samples // 2) + 1),
+            )
+            inputs = torch.cat([torch.real(inputs), torch.imag(inputs)], dim=1)
+            assert_eq(
+                inputs.shape,
+                (B1 * B2, 2 * self.num_receivers, (self.crop_length_samples // 2) + 1),
+            )
+
+        assert_eq(
+            inputs.shape,
+            (
+                B1 * B2,
+                self.num_receivers * self.channels_per_receiver,
+                self.input_length,
+            ),
+        )
+
+        predictions = self.model(inputs)
 
         assert_eq(predictions.shape, ((B1 * B2), 1))
         predictions = predictions.reshape(B1, B2)

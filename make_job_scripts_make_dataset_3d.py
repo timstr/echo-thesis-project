@@ -14,7 +14,7 @@ def make_script(mode, worker_index, num_workers, count):
     contents = f"""\
     #!/bin/bash
 
-    #PBS -l walltime=5:00:00,select=1:ncpus=4:ngpus=1:mem=16gb
+    #PBS -l walltime=01:00:00,select=1:ncpus=4:ngpus=1:mem=16gb
     #PBS -N {desc}
     #PBS -A st-rhodin-1-gpu
     #PBS -m abe
@@ -47,8 +47,8 @@ def make_script(mode, worker_index, num_workers, count):
         f.write(contents)
 
 
-num_workers = 20
-for mode, count in [("orbiting-sphere", 1000)]:
+num_workers = 10
+for mode, count in [("random-outer", 111)]:
     for worker_index in range(num_workers):
         make_script(
             mode=mode,

@@ -7,8 +7,12 @@ if not os.path.exists(out_folder):
     os.makedirs(out_folder)
 
 
-def make_script(tof_crop_size, x_count, y_count, z_count):
-    desc = f"tof_c{tof_crop_size}_x{x_count}_y{y_count}_z{z_count}"
+def make_script(use_convolutions, use_fourier_transform, hidden_features, kernel_size):
+    desc_cnn_fc = "cnn" if use_convolutions else "fc"
+    desc_kernel = f"_k{kernel_size}" if use_convolutions else ""
+    desc_fdtd = "_fd" if use_fourier_transform else "_td"
+    desc_feat = f"_h{hidden_features}"
+    desc = desc_cnn_fc + desc_kernel + desc_fdtd + desc_feat
     contents = f"""\
     #!/bin/bash
 
@@ -34,17 +38,21 @@ def make_script(tof_crop_size, x_count, y_count, z_count):
         --experiment={desc} \\
         --batchsize=32 \\
         --iterations=1000000 \\
-        --tofcropsize={tof_crop_size} \\
+        --tofcropsize=256 \\
         --samplesperexample=256 \\
         --plotinterval=1024 \\
         --validationinterval=4096 \\
-        --receivercountx={x_count} \\
-        --receivercounty={y_count} \\
-        --receivercountz={z_count} \\
+        --receivercountx=1 \\
+        --receivercounty=2 \\
+        --receivercountz=2 \\
         --chirpf0=18000.0 \\
         --chirpf1=22000.0 \\
         --chirplen=0.001 \\
-        --validationdownsampling=4
+        --validationdownsampling=4 \\
+        --use_convolutions={use_convolutions} \\
+        --use_fourier_transform={use_fourier_transform} \\
+        --hidden_features={hidden_features} \\
+        --kernel_size={kernel_size}
 
     echo "Training completed."
     """
@@ -54,12 +62,17 @@ def make_script(tof_crop_size, x_count, y_count, z_count):
         f.write(contents)
 
 
-for tof_crop_size in [64, 128, 256]:
-    for x_count in [1, 2, 4]:
-        for yz_count in [2, 4]:
+for hidden_features in [64, 128, 256]:
+    for use_convolutions, kernel_size in [
+        (False, 0),
+        (True, 5),
+        (True, 15),
+        (True, 31),
+    ]:
+        for use_fourier_transform in [False, True]:
             make_script(
-                tof_crop_size=tof_crop_size,
-                x_count=x_count,
-                y_count=yz_count,
-                z_count=yz_count,
+                hidden_features=hidden_features,
+                kernel_size=kernel_size,
+                use_convolutions=use_convolutions,
+                use_fourier_transform=use_fourier_transform,
             )

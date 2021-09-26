@@ -2,7 +2,6 @@ import math
 import random
 import torch
 
-from signals_and_geometry import sample_obstacle_map
 from simulation_description import AcousticMediumProperties, SimulationDescription
 from kwave_util import make_ball, make_box
 from assert_eq import assert_eq
@@ -178,38 +177,115 @@ def make_receiver_indices(num_x, num_y, num_z):
     return flat_indices
 
 
-def make_random_training_locations(
-    obstacle_map_batch, samples_per_example, device, description
-):
+def make_random_training_locations(sdf_batch, samples_per_example, device, description):
     with torch.no_grad():
-        assert isinstance(obstacle_map_batch, torch.Tensor)
+        assert isinstance(sdf_batch, torch.Tensor)
         assert isinstance(samples_per_example, int)
         assert isinstance(description, SimulationDescription)
-        B = obstacle_map_batch.shape[0]
-        locations_min = torch.tensor(
-            [description.xmin, description.ymin, description.zmin],
-            dtype=torch.float32,
-            device=device,
-        ).reshape(1, 1, 3)
+        assert_eq(sdf_batch.ndim, 4)
+        B = sdf_batch.shape[0]
 
-        locations_max = torch.tensor(
-            [description.xmax, description.ymax, description.zmax],
-            dtype=torch.float32,
-            device=device,
-        ).reshape(1, 1, 3)
+        num_voxels = description.Nx * description.Ny * description.Nz
 
-        def new_locations():
-            r = torch.rand(
-                (B, samples_per_example, 3), dtype=torch.float32, device=device
+        sdf_flat = sdf_batch.reshape(B, num_voxels)
+
+        minimum_distance_cm = 2.0
+
+        probability_decay_per_cm = 0.5
+
+        unweighted_probabilities = torch.exp(
+            100.0
+            * math.log(probability_decay_per_cm)
+            * torch.clamp(sdf_flat - 0.01 * minimum_distance_cm, min=0.0)
+        )
+
+        unweighted_cumulative_probabilities = torch.cumsum(
+            unweighted_probabilities, dim=1
+        )
+        assert_eq(unweighted_cumulative_probabilities.shape, (B, num_voxels))
+
+        unweighted_probability_sums = unweighted_cumulative_probabilities[:, -1]
+        assert_eq(unweighted_probability_sums.shape, (B,))
+
+        cumulative_probabilities = (
+            unweighted_cumulative_probabilities
+            / unweighted_probability_sums.unsqueeze(-1)
+        )
+
+        assert_eq(cumulative_probabilities.shape, (B, num_voxels))
+
+        lower_bounds = torch.zeros(
+            (B, samples_per_example), dtype=torch.long, device=sdf_batch.device
+        )
+        upper_bounds = torch.full(
+            (B, samples_per_example),
+            dtype=torch.long,
+            device=sdf_batch.device,
+            fill_value=num_voxels,
+        )
+
+        targets = torch.rand(
+            (B, samples_per_example), dtype=torch.float32, device=sdf_batch.device
+        )
+
+        index_offsets = num_voxels * torch.tensor(
+            range(B), dtype=torch.long, device=sdf_batch.device
+        )
+        index_offsets = index_offsets.unsqueeze(-1)
+        assert_eq(index_offsets.shape, (B, 1))
+
+        num_steps = math.ceil(math.log2(num_voxels))
+
+        for i in range(num_steps):
+            indices = torch.div(lower_bounds + upper_bounds, 2, rounding_mode="trunc")
+
+            indices_flat = (indices + index_offsets).reshape(B * samples_per_example)
+
+            cdf_values = torch.index_select(
+                cumulative_probabilities.reshape(B * num_voxels),
+                dim=0,
+                index=indices_flat,
             )
-            return locations_min + (r * (locations_max - locations_min))
 
-        locations = new_locations()
-        mask = torch.ones_like(locations, dtype=torch.bool)
-        for _ in range(50):
-            sdf = sample_obstacle_map(obstacle_map_batch, locations, description)
-            mask[sdf < 0.099] = 0
-            locations[mask] = new_locations()[mask]
+            assert_eq(cdf_values.shape, (B * samples_per_example,))
+            cdf_values = cdf_values.reshape(B, samples_per_example)
+
+            high = cdf_values > targets
+            low = torch.logical_not(high)
+
+            lower_bounds[low] = indices[low]
+            upper_bounds[high] = indices[high]
+
+        indices = lower_bounds
+
+        indices_z = torch.fmod(indices, description.Nz)
+        indices = torch.div(indices, description.Nz, rounding_mode="trunc")
+        indices_y = torch.fmod(indices, description.Ny)
+        indices = torch.div(indices, description.Ny, rounding_mode="trunc")
+        indices_x = indices
+
+        locations_x = (
+            description.xmin
+            + (description.xmax - description.xmin) * (indices_x / description.Nx)
+            + description.dx
+            * (-0.5 + 0.5 * torch.rand_like(indices_x, dtype=torch.float32))
+        )
+        locations_y = (
+            description.ymin
+            + (description.ymax - description.ymin) * (indices_y / description.Ny)
+            + description.dy
+            * (-0.5 + 0.5 * torch.rand_like(indices_y, dtype=torch.float32))
+        )
+        locations_z = (
+            description.zmin
+            + (description.zmax - description.zmin) * (indices_z / description.Nz)
+            + description.dz
+            * (-0.5 + 0.5 * torch.rand_like(indices_z, dtype=torch.float32))
+        )
+
+        locations = torch.stack([locations_x, locations_y, locations_z], dim=-1)
+        assert_eq(locations.shape, (B, samples_per_example, 3))
+
         return locations
 
 

@@ -120,7 +120,7 @@ def main():
         )
 
         # ax_l.set_ylim(-5e-4, 5e-4)
-        ax_l.set_ylim(-1, 1)
+        ax_l.set_ylim(-1.5, 1.5)
         ax_l.set_xlim(0, crop_size)
 
         for j in range(description.sensor_count):
