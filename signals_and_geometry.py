@@ -11,16 +11,16 @@ from utils import progress_bar
 
 
 # signed, clipped logarithm
-# def sclog(t):
-#     max_val = 1e0
-#     min_val = 1e-5
-#     signs = torch.sign(t)
-#     t = torch.abs(t)
-#     t = torch.clamp(t, min=min_val, max=max_val)
-#     t = torch.log(t)
-#     t = (t - math.log(min_val)) / (math.log(max_val) - math.log(min_val))
-#     t = t * signs
-#     return t
+def sclog(t):
+    max_val = 1e0
+    min_val = 1e-5
+    signs = torch.sign(t)
+    t = torch.abs(t)
+    t = torch.clamp(t, min=min_val, max=max_val)
+    t = torch.log(t)
+    t = (t - math.log(min_val)) / (math.log(max_val) - math.log(min_val))
+    t = t * signs
+    return t
 
 
 def make_fm_chirp(
@@ -270,6 +270,7 @@ def time_of_flight_crop(
     sampling_frequency,
     crop_length_samples,
     apply_amplitude_correction=True,
+    center_time_of_arrival=True,
 ):
     """
     recordings:
@@ -312,6 +313,11 @@ def time_of_flight_crop(
         whether or not to increase the amplitude according the expected loss
         in signal strength due to the two travel paths and the single reflection.
         bool, defaults to False
+
+    center_time_of_arrival
+        Whether to place the expected time of arrival at the center of the returned audio.
+        Otherwise, it is placed at the beginning.
+        bool, defaults to True
     """
 
     assert isinstance(recordings, torch.Tensor)
@@ -382,7 +388,11 @@ def time_of_flight_crop(
 
     total_samples = torch.round(total_time * sampling_frequency)
 
-    crop_start_samples = total_samples - (crop_length_samples // 2)
+    crop_start_samples = total_samples
+
+    if center_time_of_arrival:
+        crop_start_samples = crop_start_samples - (crop_length_samples // 2)
+
     assert_eq(crop_start_samples.shape, (B1, B2, num_receivers))
 
     crop_grid_per_receiver_offset = crop_start_samples.reshape(B1, B2, num_receivers, 1)
@@ -458,12 +468,18 @@ def sdf_to_occupancy(sdf, threshold=0.0):
 def backfill_occupancy(occupancy):
     assert isinstance(occupancy, torch.Tensor)
     assert_eq(occupancy.dtype, torch.bool)
-    Nx, Ny, Nz = occupancy.shape
-    mask = torch.zeros((Ny, Nz), dtype=torch.bool, device=occupancy.device)
+    assert occupancy.ndim in [3, 4]
+    batch_mode = occupancy.ndim == 4
+    if not batch_mode:
+        occupancy = occupancy.unsqueeze(0)
+    B, Nx, Ny, Nz = occupancy.shape
+    mask = torch.zeros((B, Ny, Nz), dtype=torch.bool, device=occupancy.device)
     ret = torch.zeros_like(occupancy)
     for x in range(Nx):
-        mask.logical_or_(occupancy[x])
-        ret[x] = mask
+        mask.logical_or_(occupancy[:, x])
+        ret[:, x] = mask
+    if not batch_mode:
+        ret = ret.squeeze(0)
     return ret
 
 

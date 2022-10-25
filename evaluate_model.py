@@ -40,7 +40,7 @@ from which_device import get_compute_device
 from dataset3d import WaveDataset3d, k_sdf, k_sensor_recordings
 from dataset_adapters import (
     convolve_recordings_dict,
-    # sclog_dict,
+    sclog_dict,
     subset_recordings_dict,
     wavesim_to_batgnet_occupancy,
     wavesim_to_batgnet_spectrogram,
@@ -114,6 +114,20 @@ def main():
         "--restoremodelpath", type=str, dest="restoremodelpath", required=True
     )
     parser.add_argument(
+        "--hidden_features",
+        type=int,
+        dest="hidden_features",
+        default=128,
+        help="(tofnet only) size of the hidden feature dimension of the neural network, convolutional or fully-connected",
+    )
+    parser.add_argument(
+        "--kernel_size",
+        type=int,
+        dest="kernel_size",
+        default=128,
+        help="(tofnet only) size of the convolutional kernels of the neural network, if convolutions are being used",
+    )
+    parser.add_argument(
         "--backfill",
         dest="backfill",
         default=False,
@@ -124,6 +138,26 @@ def main():
         dest="offsetsdf",
         default=False,
         action="store_true",
+    )
+    parser.add_argument(
+        "--sclog",
+        dest="sclog",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--noamplitudecompensation",
+        dest="noamplitudecompensation",
+        default=False,
+        action="store_true",
+        help="(tofnet only) do not apply distance-based amplitude compensation when computing time-of-flight crop",
+    )
+    parser.add_argument(
+        "--nosdf",
+        dest="nosdf",
+        default=False,
+        action="store_true",
+        help="(tofnet only) predict binary occupancy instead of sdf",
     )
 
     args = parser.parse_args()
@@ -173,8 +207,8 @@ def main():
         dd = convolve_recordings_dict(
             subset_recordings_dict(dd, sensor_indices), fm_chirp
         )
-        # if model_type in [model_tof_net, model_batvision_waveform]:
-        #     dd = sclog_dict(dd)
+        if args.sclog:
+            dd = sclog_dict(dd)
         return dd
 
     if model_type == model_tof_net:
@@ -184,7 +218,12 @@ def main():
             recording_length_samples=description.output_length,
             crop_length_samples=args.tofcropsize,
             emitter_location=description.emitter_location,
+            hidden_features=args.hidden_features,
+            kernel_size=args.kernel_size,
+            use_convolutions=True,
+            use_fourier_transform=False,
             receiver_locations=description.sensor_locations[sensor_indices],
+            no_amplitude_compensation=args.noamplitudecompensation,
         )
     elif model_type == model_batvision_waveform:
         model = BatVisionWaveform(generator="direct")
@@ -213,6 +252,7 @@ def main():
                     sdf_offset=offset,
                     split_size=split_size_val,
                     backfill=args.backfill,
+                    no_sdf=args.nosdf,
                 )["f1score"]
 
                 if best_metric is None or (metric > best_metric):

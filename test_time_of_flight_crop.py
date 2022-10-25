@@ -5,7 +5,10 @@ import math
 import matplotlib.pyplot as plt
 import torch
 
-from current_simulation_description import make_simulation_description
+from current_simulation_description import (
+    make_receiver_indices,
+    make_simulation_description,
+)
 from dataset3d import WaveDataset3d, k_sensor_recordings, k_obstacles
 from signals_and_geometry import convolve_recordings, make_fm_chirp, time_of_flight_crop
 
@@ -20,6 +23,8 @@ def main():
         dataset_index = int(sys.argv[2])
 
     description = make_simulation_description()
+
+    receiver_indices = make_receiver_indices(1, 2, 2)
 
     # dataset = WaveDataset3d(desc, "dataset_train.h5")
     dataset = WaveDataset3d(description, path_to_dataset)
@@ -36,11 +41,11 @@ def main():
     for z in range(description.Nz):
         obstacles_depthmap[obstacles[:, :, z]] = z / (description.Nz - 1)
 
-    recordings = example[k_sensor_recordings]
+    recordings = example[k_sensor_recordings][receiver_indices]
 
     fm_chirp = make_fm_chirp(
-        begin_frequency_Hz=32_000.0,
-        end_frequency_Hz=0_000.0,
+        begin_frequency_Hz=18_000.0,
+        end_frequency_Hz=22_000.0,
         sampling_frequency=description.output_sampling_frequency,
         chirp_length_samples=math.ceil(0.001 * description.output_sampling_frequency),
         wave="sine",
@@ -53,7 +58,7 @@ def main():
     fig, ax = plt.subplots(1, 2, figsize=(10, 5), dpi=80)
     fig.tight_layout(rect=(0.0, 0.05, 1.0, 0.95))
 
-    crop_size = 128
+    crop_size = 256
 
     ax_l = ax[0]
     ax_r = ax[1]
@@ -109,27 +114,33 @@ def main():
                 recordings=recordings.unsqueeze(0),
                 sample_locations=torch.Tensor([[[x_coord, y_coord, z_coord]]]),
                 emitter_location=torch.Tensor(description.emitter_location),
-                receiver_locations=torch.Tensor(description.sensor_locations),
+                receiver_locations=torch.Tensor(
+                    description.sensor_locations[receiver_indices]
+                ),
                 speed_of_sound=description.air_properties.speed_of_sound,
                 sampling_frequency=description.output_sampling_frequency,
                 crop_length_samples=crop_size,
                 apply_amplitude_correction=True,
+                # center_time_of_arrival=False,
             )
             .squeeze(0)
             .squeeze(0)
         )
 
+        # ax_l.set_ylim(-1e-1, 1e-1)
         # ax_l.set_ylim(-5e-4, 5e-4)
-        ax_l.set_ylim(-1.5, 1.5)
-        ax_l.set_xlim(0, crop_size)
+        # ax_l.set_ylim(-1.5, 1.5)
+        ax_l.set_xlim(0, crop_size - 1)
 
-        for j in range(description.sensor_count):
-            ax_l.plot(audio_cropped[j].detach())
+        for j in range(len(receiver_indices)):
+            ax_l.plot(
+                audio_cropped[j].detach() + j * 0.08, c=(0, 0, 0, 1.0), linewidth=2
+            )
 
         ax_r.set_xlim(0, description.Nx)
         ax_r.set_ylim(0, description.Ny)
         # ax_r.imshow(obstacles_z_slice.permute(1, 0))
-        ax_r.imshow(obstacles_depthmap.permute(1, 0))
+        ax_r.imshow(-obstacles_depthmap.permute(1, 0), cmap="gray")
 
         marker_x = x_index
         marker_y = y_index
@@ -154,13 +165,13 @@ def main():
             marker="$e$",
         )
         ax_r.scatter(
-            description.sensor_indices[:, 0],
-            description.sensor_indices[:, 1],
+            description.sensor_indices[receiver_indices, 0],
+            description.sensor_indices[receiver_indices, 1],
             marker="$r$",
         )
 
         fig.canvas.draw()
-        fig.canvas.flush_events()
+        fig.canvas.flush_ ()
 
 
 if __name__ == "__main__":

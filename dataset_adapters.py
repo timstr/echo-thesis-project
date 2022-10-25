@@ -1,4 +1,4 @@
-from signals_and_geometry import convolve_recordings  # , sclog
+from signals_and_geometry import convolve_recordings, sclog
 import torch
 import torch.nn.functional as F
 import torchaudio
@@ -11,13 +11,13 @@ from current_simulation_description import Nx, Ny, Nz, minimum_x_units
 from which_device import get_compute_device
 
 
-# def sclog_dict(dd):
-#     assert isinstance(dd, DeviceDict)
-#     dd_new = DeviceDict({})
-#     for k, v in dd.items():
-#         dd_new[k] = v
-#     dd_new[k_sensor_recordings] = sclog(dd[k_sensor_recordings])
-#     return dd_new
+def sclog_dict(dd):
+    assert isinstance(dd, DeviceDict)
+    dd_new = DeviceDict({})
+    for k, v in dd.items():
+        dd_new[k] = v
+    dd_new[k_sensor_recordings] = sclog(dd[k_sensor_recordings])
+    return dd_new
 
 
 def subset_recordings_dict(dd, sensor_indices):

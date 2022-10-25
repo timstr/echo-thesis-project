@@ -22,6 +22,7 @@ class TimeOfFlightNet(nn.Module):
         hidden_features,
         kernel_size,
         use_fourier_transform,
+        no_amplitude_compensation,
     ):
         super(TimeOfFlightNet, self).__init__()
 
@@ -41,6 +42,7 @@ class TimeOfFlightNet(nn.Module):
         assert isinstance(hidden_features, int)
         assert isinstance(kernel_size, int)
         assert isinstance(use_fourier_transform, bool)
+        assert isinstance(no_amplitude_compensation, bool)
 
         self.speed_of_sound = speed_of_sound
         self.sampling_frequency = sampling_frequency
@@ -61,6 +63,7 @@ class TimeOfFlightNet(nn.Module):
             data=receiver_locations_tensor,
             requires_grad=False,
         )
+        self.no_amplitude_compensation = no_amplitude_compensation
 
         self.use_fourier_transform = use_fourier_transform
 
@@ -76,7 +79,9 @@ class TimeOfFlightNet(nn.Module):
             return nn.LeakyReLU(0.1)
 
         if use_convolutions:
-            final_length = self.input_length // 8
+            final_length = self.input_length // 8 + (
+                1 if self.use_fourier_transform else 0
+            )
             final_features = 1024 // final_length
             conv_padding = (kernel_size - 1) // 2
 
@@ -114,7 +119,7 @@ class TimeOfFlightNet(nn.Module):
                 nn.Linear(in_features=(final_features * final_length), out_features=1),
             )
         else:
-            # Simple 2-layer fully-connected model
+            # Simple 3-layer fully-connected model
             self.model = nn.Sequential(
                 nn.BatchNorm1d(num_features=num_receivers * self.channels_per_receiver),
                 Reshape(
@@ -145,6 +150,7 @@ class TimeOfFlightNet(nn.Module):
             speed_of_sound=self.speed_of_sound,
             sampling_frequency=self.sampling_frequency,
             crop_length_samples=self.crop_length_samples,
+            apply_amplitude_correction=(not self.no_amplitude_compensation),
         )
 
         B1, B2 = sample_locations.shape[:2]

@@ -33,6 +33,7 @@ class SimpleTOFPredictor(nn.Module):
         crop_length_samples,
         emitter_location,
         receiver_locations,
+        emitted_signal,
     ):
         super(SimpleTOFPredictor, self).__init__()
 
@@ -72,6 +73,18 @@ class SimpleTOFPredictor(nn.Module):
             requires_grad=False,
         )
 
+        assert isinstance(emitted_signal, torch.Tensor)
+        (L,) = emitted_signal.shape
+        emitted_signal_cut = torch.zeros(
+            (crop_length_samples,),
+        )
+        min_length = min(crop_length_samples, L)
+        emitted_signal_cut[:min_length] = emitted_signal[:min_length]
+        self.emitted_signal = nn.parameter.Parameter(
+            data=emitted_signal_cut.reshape(1, 1, 1, crop_length_samples),
+            requires_grad=False,
+        )
+
         self.window_fn = nn.parameter.Parameter(
             data=(
                 0.5 - 0.5 * torch.cos(torch.linspace(0.0, math.pi, crop_length_samples))
@@ -89,6 +102,7 @@ class SimpleTOFPredictor(nn.Module):
             sampling_frequency=self.sampling_frequency,
             crop_length_samples=self.crop_length_samples,
             # apply_amplitude_correction=True,
+            # center_time_of_arrival=False,
         )
 
         # recordings_cropped = sclog(recordings_cropped)
@@ -97,14 +111,21 @@ class SimpleTOFPredictor(nn.Module):
 
         recordings_windowed = recordings_cropped * self.window_fn
 
-        # magnitude = torch.sum(
-        #     torch.sum(recordings_windowed, dim=2),
+        # recordings_dotted = recordings_windowed * self.emitted_signal
+
+        magnitude = torch.mean(
+            torch.mean(recordings_windowed, dim=2),
+            dim=2,
+        )
+
+        # magnitude = torch.mean(
+        #     torch.mean(recordings_windowed, dim=2),
         #     dim=2,
         # )
 
-        magnitude = torch.mean(
-            torch.mean(torch.square(recordings_windowed), dim=2), dim=2
-        ) / (torch.mean(torch.var(recordings_windowed, dim=2), dim=2) + 1e-3)
+        # magnitude = torch.mean(
+        #     torch.mean(torch.square(recordings_windowed), dim=2), dim=2
+        # ) / (torch.mean(torch.var(recordings_windowed, dim=2), dim=2) + 1e-6)
 
         # magnitude = torch.sum(torch.square(torch.sum(recordings_cropped, dim=2)), dim=2)
 
@@ -166,10 +187,10 @@ def main():
     parser.add_argument("--ny", type=int, dest="ny", default=4)
     parser.add_argument("--nz", type=int, dest="nz", default=4)
     parser.add_argument(
-        "--f0", type=float, dest="f0", help="chirp start frequency (Hz)", default=0.0
+        "--f0", type=float, dest="f0", help="start frequency (Hz)", default=0_000.0
     )
     parser.add_argument(
-        "--f1", type=float, dest="f1", help="end frequency (Hz)", default=20_000.0
+        "--f1", type=float, dest="f1", help="end frequency (Hz)", default=22_000.0
     )
     parser.add_argument(
         "--l", type=float, dest="l", help="chirp duration (seconds)", default=0.001
@@ -229,6 +250,7 @@ def main():
         crop_length_samples=args.tofcropsize,
         emitter_location=description.emitter_location,
         receiver_locations=description.sensor_locations[sensor_indices],
+        emitted_signal=chirp.to(get_compute_device()),
     ).to(get_compute_device())
 
     fig, axes = plt.subplots(1, 2, figsize=(8, 4), dpi=80)

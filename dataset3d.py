@@ -260,7 +260,7 @@ class WaveDataset3d(torch.utils.data.Dataset):
         sdf = torch.tensor(sdf)
 
         # Hmmmm
-        sdf = torch.clamp(sdf, max=0.1)
+        # sdf = torch.clamp(sdf, max=0.1)
 
         return DeviceDict(
             {k_sensor_recordings: sensor_recordings, k_obstacles: obstacles, k_sdf: sdf}

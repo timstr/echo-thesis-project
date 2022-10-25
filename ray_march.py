@@ -40,7 +40,7 @@ from current_simulation_description import (
 from dataset3d import WaveDataset3d, k_sensor_recordings, k_sdf, k_obstacles
 from dataset_adapters import (
     convolve_recordings_dict,
-    # sclog_dict,
+    sclog_dict,
     subset_recordings_dict,
     wavesim_to_batgnet_spectrogram,
     wavesim_to_batvision_spectrogram,
@@ -54,6 +54,12 @@ model_tof_net = "tofnet"
 model_batvision_waveform = "batvision_waveform"
 model_batvision_spectrogram = "batvision_spectrogram"
 model_batgnet = "batgnet"
+
+view_perspective = "perspective"
+view_front = "front"
+view_top = "top"
+view_side = "side"
+view_front_perspective = "front_perspective"
 
 
 def main():
@@ -121,16 +127,69 @@ def main():
         action="store_true",
     )
     parser.add_argument(
+        "--show_sdf_plane",
+        dest="show_sdf_plane",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--show_axes",
+        dest="show_axes",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
         "--backfill",
         dest="backfill",
         default=False,
         action="store_true",
     )
+    parser.add_argument(
+        "--sclog",
+        dest="sclog",
+        default=False,
+        action="store_true",
+    )
     parser.add_argument("--supersampling", type=int, dest="supersampling", default=None)
+    parser.add_argument(
+        "--view",
+        type=str,
+        choices=[
+            view_perspective,
+            view_front,
+            view_side,
+            view_top,
+            view_front_perspective,
+        ],
+        dest="view",
+        required=False,
+        default=view_perspective,
+    )
     args = parser.parse_args()
 
-    if args.model is not None:
-        assert args.restoremodelpath is not None
+    apply_sclog = args.sclog
+    which_model = args.model
+    if args.restoremodelpath is not None and which_model is None:
+        for model_type in [
+            model_tof_net,
+            model_batvision_waveform,
+            model_batvision_spectrogram,
+            model_batgnet,
+        ]:
+            if model_type in args.restoremodelpath:
+                which_model = model_type
+                print(
+                    f'NOTE: the model type "{which_model}" was inferred from the model path'
+                )
+        if which_model is None:
+            raise Exception(
+                f"ERROR: please specify a model type for the model path {args.restoremodelpath}"
+            )
+        if "_scl_" in args.restoremodelpath and not apply_sclog:
+            apply_sclog = True
+            print(
+                f'NOTE: apply sclog because "_scl_" was found in the model path {args.restoremodelpath}'
+            )
 
     if args.restoremodelpath is None:
         prediction = False
@@ -164,9 +223,7 @@ def main():
 
     network_prediction_split_size = SplitSize("network_prediction")
 
-    model_type = args.model
-
-    if model_type != model_tof_net:
+    if prediction and (which_model != model_tof_net):
         assert_eq(args.receivercountx, 1)
         assert_eq(args.receivercounty, 2)
         assert_eq(args.receivercountz, 2)
@@ -208,11 +265,11 @@ def main():
             dd = convolve_recordings_dict(
                 subset_recordings_dict(dd, sensor_indices), fm_chirp
             )
-            # if model_type in [model_tof_net, model_batvision_waveform]:
-            #     dd = sclog_dict(dd)
+            if apply_sclog:
+                dd = sclog_dict(dd)
             return dd
 
-        if model_type == model_tof_net:
+        if which_model == model_tof_net:
             the_model = TimeOfFlightNet(
                 speed_of_sound=description.air_properties.speed_of_sound,
                 sampling_frequency=description.output_sampling_frequency,
@@ -220,12 +277,17 @@ def main():
                 crop_length_samples=args.tofcropsize,
                 emitter_location=description.emitter_location,
                 receiver_locations=description.sensor_locations[sensor_indices],
+                use_convolutions=True,
+                use_fourier_transform=False,
+                kernel_size=31,
+                hidden_features=128,
+                no_amplitude_compensation=False,
             )
-        elif model_type == model_batvision_waveform:
+        elif which_model == model_batvision_waveform:
             the_model = BatVisionWaveform(generator="direct")
-        elif model_type == model_batvision_spectrogram:
+        elif which_model == model_batvision_spectrogram:
             the_model = BatVisionSpectrogram(generator="unet")
-        elif model_type == model_batgnet:
+        elif which_model == model_batgnet:
             the_model = BatGNet()
 
         restore_module(the_model, args.restoremodelpath)
@@ -238,19 +300,47 @@ def main():
         if prediction:
             example = adapt_signals(example)
 
-        # rm_camera_center = [description.xmin - 0.01, 0.0, 0.0]
-        # rm_camera_up = [0.0, 0.5 * description.Ny * description.dy, 0.0]
-        # rm_camera_right = [0.0, 0.0, 0.5 * description.Nz * description.dz]
-        # rm_x_resolution = 512
-        # rm_y_resolution = 512
-        # rm_fov_deg = 30.0
+        if args.view == view_top:
+            # top view
+            rm_camera_center = [
+                0.5 * (description.xmin + description.xmax),
+                description.ymin - 0.01,
+                0.5 * (description.zmin + description.zmax),
+            ]
+            rm_camera_up = [0.0, 0.0, 0.55 * description.Nx * description.dx]
+            rm_camera_right = [0.55 * description.Nx * description.dx, 0.0, 0.0]
+            rm_x_resolution = 1024
+            rm_y_resolution = 1024
+            rm_fov_deg = 0.0
+        elif args.view == view_side:
+            # side view
+            rm_camera_center = [
+                0.5 * (description.xmin + description.xmax),
+                0.5 * (description.ymin + description.ymax),
+                description.zmax + 0.01,
+            ]
+            rm_camera_up = [0.0, 0.55 * description.Nx * description.dx, 0.0]
+            rm_camera_right = [0.55 * description.Nx * description.dx, 0.0, 0.0]
+            rm_x_resolution = 1024
+            rm_y_resolution = 1024
+            rm_fov_deg = 0.0
+        elif args.view in [view_front, view_front_perspective]:
+            # front view
+            rm_camera_center = [description.xmin - 0.01, 0.0, 0.0]
+            rm_camera_up = [0.0, 0.55 * description.Nx * description.dx, 0.0]
+            rm_camera_right = [0.0, 0.0, 0.55 * description.Nx * description.dx]
+            rm_x_resolution = 1024
+            rm_y_resolution = 1024
+            rm_fov_deg = 0.0 if args.view == view_front else 10.0
 
-        rm_camera_center = [-0.445, -0.4, 1.0]
-        rm_camera_up = vector_normalize([-0.2, 1.0, 0.2], norm=0.6)
-        rm_camera_right = vector_normalize([1.0, 0.0, 1.0], norm=1.2)
-        rm_x_resolution = 1024 * 2
-        rm_y_resolution = 512 * 2
-        rm_fov_deg = 10.0
+        elif args.view == view_perspective:
+            # perspective view
+            rm_camera_center = [-0.445, -0.4, 1.0]
+            rm_camera_up = vector_normalize([-0.2, 1.0, 0.2], norm=0.6)
+            rm_camera_right = vector_normalize([1.0, 0.0, 1.0], norm=1.2)
+            rm_x_resolution = 1024 * 2
+            rm_y_resolution = 512 * 2
+            rm_fov_deg = 10.0
 
         # Make sure that camera directions are orthogonal
         assert (
@@ -266,9 +356,9 @@ def main():
             < 1e-6
         )
 
-        if prediction and model_type == model_tof_net:
+        if prediction and which_model == model_tof_net:
 
-            if args.precompute and model_type == model_tof_net:
+            if args.precompute and which_model == model_tof_net:
                 locations = all_grid_locations(
                     get_compute_device(), description, downsample_factor=1
                 )
@@ -334,6 +424,8 @@ def main():
                     emitter_location=raymarch_emitter_location,
                     receiver_locations=raymarch_receiver_locations,
                     field_of_view_degrees=rm_fov_deg,
+                    show_sdf_plane=args.show_sdf_plane,
+                    show_axes=args.show_axes,
                 )
             else:
                 img = split_till_it_fits(
@@ -350,6 +442,8 @@ def main():
                     emitter_location=raymarch_emitter_location,
                     receiver_locations=raymarch_receiver_locations,
                     field_of_view_degrees=rm_fov_deg,
+                    show_sdf_plane=args.show_sdf_plane,
+                    show_axes=args.show_axes,
                 )
         else:
             if prediction:
@@ -358,7 +452,7 @@ def main():
                     device=get_compute_device(),
                     dtype=torch.bool,
                 )
-                if model_type == model_batgnet:
+                if which_model == model_batgnet:
                     inputs = wavesim_to_batgnet_spectrogram(example)
                     occupancy_pred = the_model(inputs.unsqueeze(0)).squeeze(0)
                     occupancy_pred_resampled = (
@@ -377,11 +471,11 @@ def main():
                         > 0.5
                     )
                     obstacle_map_pred[minimum_x_units:].copy_(occupancy_pred_resampled)
-                elif model_type in [
+                elif which_model in [
                     model_batvision_waveform,
                     model_batvision_spectrogram,
                 ]:
-                    if model_type == model_batvision_waveform:
+                    if which_model == model_batvision_waveform:
                         inputs = wavesim_to_batvision_waveform(example)
                     else:
                         inputs = wavesim_to_batvision_spectrogram(example)
@@ -427,6 +521,8 @@ def main():
                 emitter_location=raymarch_emitter_location,
                 receiver_locations=raymarch_receiver_locations,
                 field_of_view_degrees=rm_fov_deg,
+                show_sdf_plane=args.show_sdf_plane,
+                show_axes=args.show_axes,
             )
 
         dataset_folder, dataset_name = os.path.split(args.path_to_dataset)

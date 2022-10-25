@@ -8,6 +8,7 @@ from assert_eq import assert_eq
 from network_utils import split_network_prediction
 from signals_and_geometry import sample_obstacle_map
 from simulation_description import SimulationDescription
+from current_simulation_description import minimum_x_units
 from which_device import get_compute_device
 from utils import progress_bar
 
@@ -165,7 +166,7 @@ def blue_orange_sdf_colours(img):
 
     out = base_colour + mix * (paler_colour - base_colour)
 
-    out *= 1.0 - 0.2 * torch.cos(60.0 * img) ** 4
+    out *= 1.0 - 0.2 * torch.cos(25 * np.pi * img) ** 4
 
     out = torch.lerp(out, white, 1.0 - smoothstep(0.0, 0.02, torch.abs(img)))
 
@@ -321,6 +322,33 @@ def _spheres_sdf(sphere_locations, sample_locations, sphere_radius):
     return min_dist - sphere_radius
 
 
+def _midplane_sdf(description, sample_locations):
+    assert isinstance(description, SimulationDescription)
+    assert isinstance(sample_locations, torch.Tensor)
+    D, N, M = sample_locations.shape
+    assert D == 3
+    x = sample_locations[0]
+    y = sample_locations[1]
+    z = sample_locations[2]
+
+    x_positive = torch.clamp(x - description.xmax, min=0.0)
+    # x_negative = torch.clamp(x - description.xmin, max=0.0)
+    x_negative = torch.clamp(
+        x - (description.xmin + minimum_x_units * description.dx), max=0.0
+    )
+    x = x_positive + x_negative
+
+    y_positive = torch.clamp(y - description.ymax, min=0.0)
+    y_negative = torch.clamp(y - description.ymin, max=0.0)
+    y = y_positive + y_negative
+
+    z_positive = torch.clamp(z - 0.5 * (description.zmin + description.zmax), min=0.0)
+    z_negative = torch.clamp(z - description.zmin, max=0.0)
+    z = z_positive + z_negative
+
+    return torch.sqrt(x ** 2 + y ** 2 + z ** 2)
+
+
 def _raymarch_sdf_impl(
     camera_center_xyz,
     camera_up_xyz,
@@ -334,6 +362,8 @@ def _raymarch_sdf_impl(
     receiver_locations,
     emitter_location,
     field_of_view_degrees,
+    show_sdf_plane,
+    show_axes,
     num_splits,
 ):
     with torch.no_grad():
@@ -343,6 +373,8 @@ def _raymarch_sdf_impl(
         assert isinstance(description, SimulationDescription)
         assert isinstance(num_splits, int)
         assert isinstance(field_of_view_degrees, float)
+        assert isinstance(show_sdf_plane, bool)
+        assert isinstance(show_axes, bool)
         if obstacle_sdf is not None:
             assert isinstance(obstacle_sdf, torch.Tensor)
             assert obstacle_sdf.shape == (
@@ -434,9 +466,12 @@ def _raymarch_sdf_impl(
             (x_resolution, y_resolution), dtype=torch.bool, device=get_compute_device()
         )
 
-        hit_axes = torch.zeros(
-            (x_resolution, y_resolution), dtype=torch.bool, device=get_compute_device()
-        )
+        if show_axes:
+            hit_axes = torch.zeros(
+                (x_resolution, y_resolution),
+                dtype=torch.bool,
+                device=get_compute_device(),
+            )
 
         if show_emitter:
             hit_emitter = torch.zeros(
@@ -452,7 +487,14 @@ def _raymarch_sdf_impl(
                 device=get_compute_device(),
             )
 
-        num_iterations = 64
+        if show_sdf_plane:
+            hit_sdf_plane = torch.zeros(
+                (x_resolution, y_resolution),
+                dtype=torch.bool,
+                device=get_compute_device(),
+            )
+
+        num_iterations = 128
         for i in range(num_iterations):
             # cheap approximation for outer SDF:
             # - clamp locations to inner volume
@@ -472,15 +514,16 @@ def _raymarch_sdf_impl(
             clamp_displacement *= 0.8
 
             # get SDF values at each ray location
-            sampled_sdf_obstacles = _sample_obstacle_sdf(locations) + clamp_displacement
+            sampled_sdf = _sample_obstacle_sdf(locations) + clamp_displacement
 
-            sampled_sdf_obstacles.nan_to_num_(nan=np.inf)
+            sampled_sdf.nan_to_num_(nan=np.inf)
 
-            sampled_sdf_axes = _simulation_boundary_sdf(
-                description, original_locations, radius=0.001
-            )
+            if show_axes:
+                sampled_sdf_axes = _simulation_boundary_sdf(
+                    description, original_locations, radius=0.001
+                )
 
-            sampled_sdf = torch.minimum(sampled_sdf_obstacles, sampled_sdf_axes)
+                sampled_sdf = torch.minimum(sampled_sdf, sampled_sdf_axes)
 
             if show_emitter:
                 sampled_sdf_emitter = _spheres_sdf(
@@ -498,17 +541,27 @@ def _raymarch_sdf_impl(
                 # sampled_sdf.clamp_(max=sampled_sdf_receivers)
                 sampled_sdf = torch.minimum(sampled_sdf, sampled_sdf_receivers)
 
+            if show_sdf_plane:
+                sampled_sdf_sdf_plane = _midplane_sdf(
+                    description=description, sample_locations=original_locations
+                )
+
+                sampled_sdf = torch.minimum(sampled_sdf, sampled_sdf_sdf_plane)
+
             locations = original_locations
 
             # if SDF value is below threshold, make inactive
             threshold = 0.001
             active[sampled_sdf <= threshold] = 0
-            hit_axes[sampled_sdf_axes <= threshold] = 1
+            if show_axes:
+                hit_axes[sampled_sdf_axes <= threshold] = 1
 
             if show_emitter:
                 hit_emitter[sampled_sdf_emitter <= threshold] = 1
             if show_receivers:
                 hit_receivers[sampled_sdf_receivers <= threshold] = 1
+            if show_sdf_plane:
+                hit_sdf_plane[sampled_sdf_sdf_plane <= threshold] = 1
 
             # advance all active rays by their direction vector times their SDF value
             locations[:, active] += (sampled_sdf * directions)[:, active]
@@ -532,9 +585,10 @@ def _raymarch_sdf_impl(
         ret[2][inactive] = 0.8
 
         # colour axes
-        ret[0][hit_axes] = 0.0
-        ret[1][hit_axes] = 0.0
-        ret[2][hit_axes] = 0.0
+        if show_axes:
+            ret[0][hit_axes] = 0.0
+            ret[1][hit_axes] = 0.0
+            ret[2][hit_axes] = 0.0
 
         # colour emitter
         if show_emitter:
@@ -588,6 +642,16 @@ def _raymarch_sdf_impl(
         ret[1][inactive] *= shading[inactive]
         ret[2][inactive] *= shading[inactive]
 
+        # colour SDF plane
+        if show_sdf_plane:
+            v = _sample_obstacle_sdf(locations)
+            assert_eq(v.shape, (x_resolution, y_resolution))
+            rgb = colourize_sdf(v)
+            assert_eq(rgb.shape, (3, x_resolution, y_resolution))
+            ret[0][hit_sdf_plane] = rgb[0][hit_sdf_plane]
+            ret[1][hit_sdf_plane] = rgb[1][hit_sdf_plane]
+            ret[2][hit_sdf_plane] = rgb[2][hit_sdf_plane]
+
         return ret
 
 
@@ -602,6 +666,8 @@ def raymarch_sdf_ground_truth(
     receiver_locations,
     emitter_location,
     field_of_view_degrees,
+    show_sdf_plane,
+    show_axes,
     num_splits,
 ):
     return _raymarch_sdf_impl(
@@ -617,6 +683,8 @@ def raymarch_sdf_ground_truth(
         receiver_locations=receiver_locations,
         emitter_location=emitter_location,
         field_of_view_degrees=field_of_view_degrees,
+        show_sdf_plane=show_sdf_plane,
+        show_axes=show_axes,
         num_splits=num_splits,
     )
 
@@ -633,6 +701,8 @@ def raymarch_sdf_prediction(
     receiver_locations,
     emitter_location,
     field_of_view_degrees,
+    show_sdf_plane,
+    show_axes,
     num_splits,
 ):
     return _raymarch_sdf_impl(
@@ -648,5 +718,7 @@ def raymarch_sdf_prediction(
         receiver_locations=receiver_locations,
         emitter_location=emitter_location,
         field_of_view_degrees=field_of_view_degrees,
+        show_sdf_plane=show_sdf_plane,
+        show_axes=show_axes,
         num_splits=num_splits,
     )

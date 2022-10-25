@@ -26,7 +26,7 @@ from dataset3d import WaveDataset3d, k_sensor_recordings, k_sdf
 from dataset_adapters import (
     convolve_recordings_dict,
     occupancy_grid_to_depthmap,
-    # sclog_dict,
+    sclog_dict,
     subset_recordings_dict,
     wavesim_to_batgnet_occupancy,
     wavesim_to_batgnet_spectrogram,
@@ -45,6 +45,7 @@ from current_simulation_description import (
     make_random_training_locations,
     make_receiver_indices,
     make_simulation_description,
+    weight_sdf_for_sampling,
 )
 from torch.utils.data._utils.collate import default_collate
 from signals_and_geometry import make_fm_chirp, sample_obstacle_map
@@ -189,7 +190,7 @@ def main():
         "--kernel_size",
         type=int,
         dest="kernel_size",
-        default=128,
+        default=31,
         help="(tofnet only) size of the convolutional kernels of the neural network, if convolutions are being used",
     )
 
@@ -203,6 +204,12 @@ def main():
     parser.add_argument(
         "--backfill",
         dest="backfill",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--sclog",
+        dest="sclog",
         default=False,
         action="store_true",
     )
@@ -234,7 +241,7 @@ def main():
         default=1,
         help="factor by which to downsample space when densely computing validation metrics, relative to full dataset resolution",
     )
-    parser.add_argument("--receivercountx", type=int, dest="receivercountx", default=2)
+    parser.add_argument("--receivercountx", type=int, dest="receivercountx", default=1)
     parser.add_argument("--receivercounty", type=int, dest="receivercounty", default=2)
     parser.add_argument("--receivercountz", type=int, dest="receivercountz", default=2)
     parser.add_argument(
@@ -243,12 +250,42 @@ def main():
     parser.add_argument(
         "--restoreoptimizerpath", type=str, dest="restoreoptimizerpath", default=None
     )
+    parser.add_argument(
+        "--nosdf",
+        dest="nosdf",
+        default=False,
+        action="store_true",
+        help="(tofnet only) predict binary occupancy instead of sdf",
+    )
+    parser.add_argument(
+        "--noimportancesampling",
+        dest="noimportancesampling",
+        default=False,
+        action="store_true",
+        help="(tofnet only) use uniform random sampling for training locations instead of importance sampling",
+    )
+    parser.add_argument(
+        "--importanceweightedloss",
+        dest="importanceweightedloss",
+        default=False,
+        action="store_true",
+        help="(tofnet only) use uniform random sampling for training locations and a weighted loss function",
+    )
+    parser.add_argument(
+        "--noamplitudecompensation",
+        dest="noamplitudecompensation",
+        default=False,
+        action="store_true",
+        help="(tofnet only) do not apply distance-based amplitude compensation when computing time-of-flight crop",
+    )
 
     args = parser.parse_args()
 
     description = make_simulation_description()
 
     assert (args.restoremodelpath is None) == (args.restoreoptimizerpath is None)
+
+    assert not (args.noimportancesampling and args.importanceweightedloss)
 
     model_type = args.model
 
@@ -315,8 +352,8 @@ def main():
         dd = convolve_recordings_dict(
             subset_recordings_dict(dd, sensor_indices), fm_chirp
         )
-        # if model_type in [model_tof_net, model_batvision_waveform]:
-        #     dd = sclog_dict(dd)
+        if args.sclog:
+            dd = sclog_dict(dd)
         return dd
 
     validation_splits = SplitSize("compute_validation_metrics")
@@ -334,6 +371,7 @@ def main():
                 adapt_signals_fn=adapt_signals,
                 sdf_offset=0.0,
                 backfill=args.backfill,
+                no_sdf=args.nosdf,
                 split_size=validation_splits,
             )
             primary_metric_name = "mean_absolute_error_sdf"
@@ -382,13 +420,19 @@ def main():
             vis_locations = make_random_training_locations(
                 sdf_batch=example_train[k_sdf].unsqueeze(0),
                 samples_per_example=args.samplesperexample,
-                device=get_compute_device(),
+                no_importance_sampling=(
+                    args.noimportancesampling or args.importanceweightedloss
+                ),
                 description=description,
             ).squeeze(0)
 
             # plot the ground truth obstacles
+            sdf_gt = example_train[k_sdf]
+            if args.nosdf:
+                sdf_gt = -1.0 + 2.0 * (sdf_gt > 0.0).float()
+
             slices_train_gt = render_slices_ground_truth(
-                example_train[k_sdf],
+                sdf_gt,
                 description,
                 locations=vis_locations,
                 colour_function=colourize_sdf,
@@ -415,8 +459,12 @@ def main():
                 global_iteration,
             )
 
+            sdf_gt = example_val[k_sdf]
+            if args.nosdf:
+                sdf_gt = -1.0 + 2.0 * (sdf_gt > 0.0).float()
+
             slices_val_gt = render_slices_ground_truth(
-                example_val[k_sdf],
+                sdf_gt,
                 description,
                 colour_function=colourize_sdf,
             )
@@ -544,6 +592,7 @@ def main():
             kernel_size=args.kernel_size,
             use_convolutions=args.use_convolutions,
             use_fourier_transform=args.use_fourier_transform,
+            no_amplitude_compensation=args.noamplitudecompensation,
         )
     elif model_type == model_batvision_waveform:
         model = BatVisionWaveform(generator="direct")
@@ -551,6 +600,11 @@ def main():
         model = BatVisionSpectrogram(generator="unet")
     elif model_type == model_batgnet:
         model = BatGNet()
+
+    # HACK
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"total parameters: {total_params}")
+    exit(0)
 
     model = model.to(get_compute_device())
 
@@ -641,14 +695,34 @@ def main():
                         locations = make_random_training_locations(
                             sdf,
                             samples_per_example=args.samplesperexample,
-                            device=get_compute_device(),
+                            no_importance_sampling=(
+                                args.noimportancesampling or args.importanceweightedloss
+                            ),
                             description=description,
                         )
 
                         gt = sample_obstacle_map(sdf, locations, description)
+                        if args.nosdf:
+                            gt = -1.0 + 2.0 * (gt > 0.0).float()
+
                         pred = model(example_batch[k_sensor_recordings], locations)
                         assert_eq(gt.shape, pred.shape)
-                        loss = torch.mean(torch.abs(pred - gt))
+                        abs_error = torch.abs(pred - gt)
+                        if args.importanceweightedloss:
+                            B = sdf.shape[0]
+                            sdf_values = sample_obstacle_map(
+                                obstacle_map_batch=sdf,
+                                locations_xyz_batch=locations,
+                                description=description,
+                            )
+                            assert_eq(sdf_values.shape, (B, args.samplesperexample))
+                            loss_weights = weight_sdf_for_sampling(sdf_values)
+                            loss_weights = loss_weights / torch.sum(loss_weights)
+                            assert_eq(loss_weights.shape, (B, args.samplesperexample))
+                            assert_eq(abs_error.shape, (B, args.samplesperexample))
+                            abs_error = abs_error * loss_weights
+
+                        loss = torch.mean(abs_error)
 
                     elif model_type in [
                         model_batvision_waveform,

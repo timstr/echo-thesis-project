@@ -142,6 +142,7 @@ def evaluate_tofnet_on_whole_dataset(
     adapt_signals_fn,
     sdf_offset,
     backfill,
+    no_sdf,
     split_size,
 ):
     assert isinstance(the_model, nn.Module)
@@ -149,6 +150,7 @@ def evaluate_tofnet_on_whole_dataset(
     assert isinstance(validationdownsampling, int)
     assert isinstance(sdf_offset, float)
     assert isinstance(backfill, bool)
+    assert isinstance(no_sdf, bool)
     assert isinstance(split_size, SplitSize)
     with torch.no_grad():
         total_metrics = {}
@@ -167,6 +169,8 @@ def evaluate_tofnet_on_whole_dataset(
                 locations_xyz_batch=locations,
                 description=description,
             )
+            if no_sdf:
+                sdf_gt = -1.0 + 2.0 * (sdf_gt > 0.0).float()
 
             sdf_pred = split_till_it_fits(
                 split_network_prediction,

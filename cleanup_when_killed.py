@@ -1,5 +1,4 @@
 import signal
-import sys
 
 
 def sigterm_handler(signo, stack_frame):
